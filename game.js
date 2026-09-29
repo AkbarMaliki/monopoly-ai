@@ -959,11 +959,18 @@
     const delta = C.x === 'cash' ? C.a : C.x === 'each' ? -C.a * Math.max(1, (v ? v.players.filter((p, i) => p && !p.out && i !== c.p).length : 1)) : 0;
     const amt = delta ? `<div class="cpAmt ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '+' : '−'}${money(Math.abs(delta))}</div>` : '';
     const note = C.x === 'free' ? '<div class="cpNote">Kartu disimpan di dompet 🗝️</div>' : '';
+    const sym = chance ? '?' : '💰', total = (chance ? E.CHANCE : E.CHEST).length;
     el.className = c.d;
-    el.innerHTML = `<div class="cpCard"><div class="cpFace cpBack"><div class="cpBackIn"><span>${chance ? '?' : '💰'}</span><b>${title}</b></div></div>
-      <div class="cpFace cpFront"><div class="cpBand">${title}</div><div class="cpIcon">${icon}</div>
+    el.innerHTML = `<div class="cpCard">
+      <div class="cpFace cpBack"><div class="cpBackIn"><span>${sym}</span><b>${title}</b><small>MONOPOLI INDONESIA</small></div></div>
+      <div class="cpFace cpFront">
+        <i class="cpCorner tl">${sym}</i><i class="cpCorner br">${sym}</i>
+        <div class="cpBand"><small>MONOPOLI INDONESIA</small>${title}</div>
+        <div class="cpIcon"><span>${icon}</span></div>
         <div class="cpText">${esc(C.m)}</div>${amt}${note}
-        <div class="cpFoot">${v && v.players[c.p] ? chip(v, c.p) : ''}<small>MONOPOLI INDONESIA</small></div></div></div>`;
+        <div class="cpFoot">${v && v.players[c.p] ? chip(v, c.p) : ''}<small>Kartu ${c.i + 1}/${total} · klik untuk tutup</small></div>
+        <div class="cpTimer"><i></i></div>
+      </div></div>`;
     el.hidden = false;
     Snd.card();
     clearTimeout(cardTimer);
