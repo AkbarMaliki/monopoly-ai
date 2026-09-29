@@ -94,29 +94,32 @@ test('kembar main lagi, kembar 3× masuk penjara', () => {
   assert.strictEqual(g.players[0].jail, 1);
   assert.strictEqual(g.step, 'end');
 });
-test('penjara: gagal 3× wajib bayar lalu jalan', () => {
+test('penjara: diam 2 giliran, giliran ke-3 bebas jalan normal tanpa denda', () => {
   const g = newGame(2);
   const p = g.players[0];
   p.pos = 10; p.jail = 1;
-  E.rng = diceSeq([[1, 2], [1, 2], [1, 2]]);
-  ok(g, 0, 'roll'); assert.strictEqual(g.step, 'end'); assert.strictEqual(p.jail, 2);
-  g.step = 'roll';
-  ok(g, 0, 'roll'); assert.strictEqual(p.jail, 3);
-  g.step = 'roll';
+  E.rng = diceSeq([[1, 2], [4, 1], [1, 2], [4, 1], [2, 3]]);
+  ok(g, 0, 'roll'); assert.strictEqual(g.step, 'end'); assert.strictEqual(p.jail, 2); assert.strictEqual(p.pos, 10);
+  ok(g, 0, 'end'); ok(g, 1, 'roll'); if (g.step === 'buy') ok(g, 1, 'decline'); while (g.step === 'auction') ok(g, E.whoActs(g), 'pass');
+  ok(g, 1, 'end');
+  ok(g, 0, 'roll'); assert.strictEqual(p.jail, 3); assert.strictEqual(p.pos, 10);
+  ok(g, 0, 'end'); ok(g, 1, 'roll'); if (g.step === 'buy') ok(g, 1, 'decline'); while (g.step === 'auction') ok(g, E.whoActs(g), 'pass');
+  ok(g, 1, 'end');
+  assert.strictEqual(p.jail, 0); // masa tahanan habis di awal giliran ke-3
+  ok(g, 0, 'roll');
+  assert.strictEqual(p.pos, 15);
+  assert.strictEqual(p.cash, 1500);
+  assert.strictEqual(E.act(g, 0, 'jailpay'), 'Aksi tidak valid');
+});
+test('penjara: lempar kembar langsung bebas', () => {
+  const g = newGame(2);
+  const p = g.players[0];
+  p.pos = 10; p.jail = 1;
+  E.rng = diceSeq([[3, 3]]);
   ok(g, 0, 'roll');
   assert.strictEqual(p.jail, 0);
-  assert.strictEqual(p.pos, 13);
-  assert.strictEqual(p.cash, 1500 - 50);
-});
-test('penjara: bayar denda lalu lempar normal', () => {
-  const g = newGame(2);
-  const p = g.players[0];
-  p.pos = 10; p.jail = 1;
-  ok(g, 0, 'jailpay');
-  assert.strictEqual(p.jail, 0); assert.strictEqual(p.cash, 1450);
-  E.rng = diceSeq([[3, 4]]);
-  ok(g, 0, 'roll');
-  assert.strictEqual(p.pos, 17);
+  assert.strictEqual(p.pos, 16);
+  assert.strictEqual(g.again, false);
 });
 test('petak Masuk Penjara', () => {
   const g = newGame(2);
@@ -271,16 +274,20 @@ test('bot menolak tawaran murah yang memberi lawan monopoli', () => {
 });
 
 console.log('Mode Langsung Bangun');
-test('beli tanah + rumah sekaligus, bangun hanya di petak tempat berhenti', () => {
+test('beli tanah + 1 rumah, 1 upgrade per kunjungan, hanya di petak tempat berhenti', () => {
   const g = newGame(2, { build: 'direct' });
   E.rng = diceSeq([[3, 3]]);
   assert.strictEqual(E.act(g, 0, 'roll'), null); // 6 Kupang (kembar → main lagi)
   assert.strictEqual(g.step, 'buy');
-  ok(g, 0, 'buy', { h: 2 });
+  ok(g, 0, 'buy', { h: 3 }); // dibatasi jadi 1 rumah
   assert.strictEqual(g.own[6], 0);
-  assert.strictEqual(g.hs[6], 2);
-  assert.strictEqual(g.players[0].cash, 1500 - 100 - 2 * 50);
+  assert.strictEqual(g.hs[6], 1);
+  assert.strictEqual(g.players[0].cash, 1500 - 100 - 50);
+  assert.strictEqual(E.act(g, 0, 'build', { t: 6 }), 'Sudah upgrade di kunjungan ini — upgrade lagi saat mampir berikutnya');
+  g.bt = -1; // anggap kunjungan berikutnya
   ok(g, 0, 'build', { t: 6 }); // tanpa syarat satu warna
+  assert.strictEqual(g.hs[6], 2);
+  g.bt = -1; ok(g, 0, 'build', { t: 6 });
   assert.strictEqual(g.hs[6], 3);
   g.own[1] = 0;
   assert.strictEqual(E.act(g, 0, 'build', { t: 1 }), 'Bangun rumah saat pionmu berhenti di kota ini');
@@ -292,6 +299,8 @@ test('beli tanah + rumah sekaligus, bangun hanya di petak tempat berhenti', () =
   E.rng = diceSeq([[1, 2]]);
   ok(g, 0, 'roll'); // lempar lagi → 9 Palu
   assert(E.canBuild(g, 0, 6));
+  g.players[0].pos = 6; g.at = 6; g.bt = -1; // mampir lagi
+  assert.strictEqual(E.canBuild(g, 0, 6), null);
 });
 test('mode klasik menolak beli rumah langsung', () => {
   const g = newGame(2);

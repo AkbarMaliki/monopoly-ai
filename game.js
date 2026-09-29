@@ -515,8 +515,8 @@
         p.bot ? `<span class="tg bot" title="Bot ${LEVEL_NAME[p.bot]}">${LEVEL_NAME[p.bot].toUpperCase()}</span>` : '',
         mode === 'online' && p.id === Net.host ? '<span class="tg host">HOST</span>' : '',
         p.away && !p.out ? '<span class="tg off">OFFLINE</span>' : '',
-        p.jail && !p.out ? '<span class="tg jail">🔒 PENJARA</span>' : '',
-        p.jc && p.jc.length ? `<span class="tg card" title="Kartu bebas penjara">🎫${p.jc.length > 1 ? '×' + p.jc.length : ''}</span>` : '',
+        p.jail && !p.out ? `<span class="tg jail" title="Sisa giliran di penjara">🔒 PENJARA ${Math.max(1, E.JAIL_TURNS + 1 - p.jail)}×</span>` : '',
+        p.jc && p.jc.length ? `<span class="tg card" title="Kartu Bebas dari Penjara">🗝 BEBAS${p.jc.length > 1 ? ' ×' + p.jc.length : ''}</span>` : '',
       ].join('');
       const ini = p.name.trim().split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase() || '?';
       const turn = i === v.turn && v.phase === 'play' && !p.out, bidding = i === w && !turn && v.phase === 'play';
@@ -572,7 +572,7 @@
     for (let t = 0; t < 40; t++) if (v.own[t] === myIdx) owned.push(t);
     const fresh = wallet.owned ? owned.filter(t => !wallet.owned.includes(t)) : [];
     wallet.owned = owned;
-    $('wCount').textContent = owned.length ? `(${owned.length})` : '';
+    $('wCount').textContent = (owned.length ? `(${owned.length})` : '') + (me.jc && me.jc.length ? ` · 🗝 ${me.jc.length} kartu` : '');
     const groups = [];
     E.GROUPS.forEach((G, k) => { const ts = owned.filter(t => TL[t].t === 'prop' && TL[t].g === k); if (ts.length) groups.push({ ts, col: G.c, full: E.hasMonopoly(v, myIdx, k) }); });
     const rs = owned.filter(t => TL[t].t === 'rail'), us = owned.filter(t => TL[t].t === 'util');
@@ -588,8 +588,16 @@
         <div class="db"><small>Sewa</small><b>${v.mg[t] ? '—' : r}</b><div class="dhs">${hs}</div></div>
         ${v.mg[t] ? '<div class="stamp">DIGADAI</div>' : ''}</div>`;
     };
-    const dh = groups.length ? groups.map(G => `<div class="dgrp${G.full ? ' full' : ''}">${G.ts.map(deed).join('')}</div>`).join('')
-      : '<div class="muted small">Belum punya properti. Beli kota saat berhenti di petaknya!</div>';
+    // kartu Bebas dari Penjara yang sedang dipegang (bisa diklik untuk dipakai saat di penjara)
+    const usable = me.jail && v.turn === myIdx && v.step === 'roll' && !v.trade;
+    const jcs = (me.jc || []).map(c => {
+      const d = c.split(':')[0];
+      return `<div class="jcard ${d}${usable ? ' use' : ''}" data-jc="1" title="${usable ? 'Klik untuk memakai kartu ini' : 'Dipakai saat kamu masuk penjara'}">
+        <div class="jh">${d === 'chance' ? 'KESEMPATAN' : 'DANA UMUM'}</div><div class="jb"><span>🗝️</span><b>BEBAS DARI PENJARA</b></div>
+        <div class="jf">${usable ? 'KLIK PAKAI' : 'simpan'}</div></div>`;
+    }).join('');
+    const dh = (jcs ? `<div class="dgrp jcs">${jcs}</div>` : '') + (groups.length ? groups.map(G => `<div class="dgrp${G.full ? ' full' : ''}">${G.ts.map(deed).join('')}</div>`).join('')
+      : '<div class="muted small">Belum punya properti. Beli kota saat berhenti di petaknya!</div>');
     if ($('wDeeds').dataset.h !== dh) { $('wDeeds').dataset.h = dh; $('wDeeds').innerHTML = dh; }
   }
 
@@ -671,20 +679,27 @@
     const upgrade = () => {
       const t = me.pos, T = TL[t];
       if (!isDirect || T.t !== 'prop' || v.own[t] !== myIdx || v.at !== t) return '';
-      const h = v.hs[t], err = E.canBuild(v, myIdx, t), hc = E.houseCost(t);
+      const h = v.hs[t], err = E.canBuild(v, myIdx, t), hc = E.houseCost(t), done = v.bt === t;
       const houses = h === 5 ? '<span class="hotel"></span>' : '<span class="house"></span>'.repeat(h) + '<span class="house ghost"></span>'.repeat(4 - h);
-      const next = h < 5 ? `Sewa ${money(E.rent(v, t, 7))} → <b>${money(T.r[h + 1])}</b>` : `Sewa maksimal <b>${money(T.r[5])}</b>`;
+      const next = h >= 5 ? `Sewa maksimal <b>${money(T.r[5])}</b>`
+        : done ? `Sewa sekarang <b>${money(E.rent(v, t, 7))}</b>` : `Sewa ${money(E.rent(v, t, 7))} → <b>${money(T.r[h + 1])}</b>`;
+      const nextName = h === 4 ? 'hotel' : `rumah ke-${h + 1}`;
+      const action = h >= 5 ? '<div class="upNote">🏨 Hotel sudah berdiri — level maksimal!</div>'
+        : done ? `<div class="upNote">✅ Sudah upgrade di kunjungan ini. Mampir lagi nanti untuk membangun ${nextName}.</div>`
+        : `<div class="aBtns">${btn('upgrade', `${ic(h === 4 ? '🏨' : '🏠')}<span class="bl"><b>${h === 4 ? 'Jadikan Hotel' : 'Bangun Rumah'} ${money(hc)}</b><small>${h === 4 ? '4 rumah → 1 hotel' : nextName} · 1× per kunjungan</small></span>`, 'blue', wait || !!err, err || '')}</div>`;
       return `<div class="upBox">${miniDeed(t)}<div class="buyInfo"><small>Kota milikmu</small><b>${esc(T.n)}</b>
-          <div class="upHs">${houses}</div><div class="bRent">${next}</div></div></div>
-        ${h < 5 ? `<div class="aBtns">${btn('upgrade', `${ic(h === 4 ? '🏨' : '🏠')}<span class="bl"><b>${h === 4 ? 'Jadikan Hotel' : 'Bangun Rumah'} ${money(hc)}</b><small>${h === 4 ? '4 rumah → 1 hotel' : `rumah ke-${h + 1}`}</small></span>`, 'blue', wait || !!err, err || '')}</div>` : ''}`;
+          <div class="upHs">${houses}</div><div class="bRent">${next}</div></div></div>${action}`;
     };
     switch (v.step) {
       case 'roll':
         if (me.jail) {
+          const left = E.JAIL_TURNS + 1 - me.jail;
+          const pips = Array.from({ length: E.JAIL_TURNS }, (_, k) => `<i class="${k < me.jail - 1 ? 'done' : k === me.jail - 1 ? 'now' : ''}"></i>`).join('');
           return `<div class="jailBox"><div class="bars">${ic('🔒', 'big')}</div><div><b>Kamu di penjara</b>
-              <small>Percobaan ke-${me.jail} dari 3 · lempar kembar untuk bebas gratis</small></div></div>
-            <div class="aBtns">${btn('roll', `<span class="dice2 sm">${dieSvg(6, 'd1')}${dieSvg(6, 'd2')}</span>Coba kembar`, 'go roll', wait)}
-              ${btn('jailpay', ic('💸') + 'Bayar ' + money(E.JAIL_FINE), 'warm', wait || me.cash < E.JAIL_FINE)}${me.jc.length ? btn('jailcard', ic('🎫') + 'Pakai kartu', 'blue', wait) : ''}</div>${TOOLS}${timer}`;
+              <small>Diam <b>${left} giliran</b> lagi — kecuali lempar dadu kembar${me.jc.length ? ' atau pakai kartu Bebas' : ''}</small>
+              <div class="jailPips" title="Giliran di penjara">${pips}</div></div></div>
+            <div class="aBtns">${btn('roll', `<span class="dice2 sm">${dieSvg(6, 'd1')}${dieSvg(6, 'd2')}</span><span class="bl"><b>Coba kembar</b><small>kembar = bebas & jalan</small></span>`, 'go roll', wait)}
+              ${me.jc.length ? btn('jailcard', `${ic('🗝️')}<span class="bl"><b>Pakai Kartu Bebas</b><small>punya ${me.jc.length} kartu</small></span>`, 'warm', wait) : ''}</div>${TOOLS}${timer}`;
         }
         return `${ribbon(`Putaran ${v.round}${v.cfg.rounds ? '/' + v.cfg.rounds : ''}`)}${v.again ? upgrade() : ''}
           <div class="aBtns">${btn('roll', `<span class="dice2">${dieSvg(v.dice[0], 'd1')}${dieSvg(v.dice[1], 'd2')}</span>
@@ -700,10 +715,11 @@
             <div class="bRent">${rentLine(t)}</div>${hint}</div></div>
           <div class="aBtns">${btn('buy', `${ic('🪙')}<span class="bl"><b>Beli ${money(T.p)}</b><small>tekan B</small></span>`, 'go', wait || !can, can ? '' : 'Uang tidak cukup — gadaikan aset dulu')}
             ${btn('decline', v.cfg.auction ? `${ic('🔨')}<span class="bl"><b>Lelang</b><small>semua boleh menawar</small></span>` : ic('➜') + 'Lewati', 'warm', wait)}</div>
-          ${isDirect && T.t === 'prop' ? `<div class="pkgHead">atau beli sekalian dengan rumah:</div><div class="aBtns small pkgs">${[1, 2, 3].map(n => {
-            const cost = T.p + n * E.houseCost(t), ok = me.cash >= cost && E.housesLeft(v) >= n;
-            return `<button data-a="buy" data-h="${n}" class="blue"${wait || !ok ? ' disabled' : ''} title="Sewa jadi ${money(T.r[n])}"><span class="pkgH">${'<span class="house"></span>'.repeat(n)}</span><span class="bl"><b>+${n} rumah</b><small>${money(cost)}</small></span></button>`;
-          }).join('')}</div>` : ''}
+          ${isDirect && T.t === 'prop' ? (() => {
+            const cost = T.p + E.houseCost(t), ok = me.cash >= cost && E.housesLeft(v) >= 1;
+            return `<div class="aBtns pkgs"><button data-a="buy" data-h="1" class="blue"${wait || !ok ? ' disabled' : ''}>
+              <span class="pkgH"><span class="house"></span></span><span class="bl"><b>Beli + 1 Rumah ${money(cost)}</b><small>sewa langsung ${money(T.r[1])} · rumah berikutnya saat mampir lagi</small></span></button></div>`;
+          })() : ''}
           ${can ? '' : `<div class="aInfo warn">Uangmu ${money(me.cash)} — kurang ${money(T.p - me.cash)}. Gadaikan aset lewat 🏠 Aset, atau lelang.</div>`}${TOOLS}${timer}`;
       }
       case 'debt': {
@@ -843,7 +859,7 @@
     } else {
       const d = {
         go: `Setiap melewati atau berhenti di MULAI, terima ${money(E.GO_SALARY)}.`,
-        jail: `Hanya mampir kalau berhenti di sini. Kalau dipenjara: lempar kembar, bayar ${money(E.JAIL_FINE)}, atau pakai kartu. Setelah 3 kali gagal wajib bayar denda.`,
+        jail: `Hanya mampir kalau berhenti di sini. Kalau dipenjara: diam ${E.JAIL_TURNS} giliran, kecuali lempar dadu kembar atau pakai kartu Bebas dari Penjara.`,
         park: 'Istirahat sejenak. Tidak terjadi apa-apa.',
         gojail: 'Langsung masuk penjara tanpa melewati MULAI.',
         chance: 'Ambil kartu Kesempatan.', chest: 'Ambil kartu Dana Umum.',
@@ -880,7 +896,7 @@
       <div class="tBody"><div class="kv"><span>Uang</span><b>${money(p.cash)}</b></div><div class="kv"><span>Total kekayaan</span><b>${money(E.worth(v, i))}</b></div>
       ${p.jc && p.jc.length ? `<div class="kv"><span>Kartu bebas penjara</span><b>${p.jc.length}</b></div>` : ''}
       ${rows || '<p class="muted">Belum punya properti.</p>'}
-      ${mine ? `<p class="muted small">${modeOf(v.cfg) === 'direct' ? 'Mode Langsung Bangun: rumah dibeli saat pionmu berhenti di kota milikmu.' : 'Bangun rumah harus merata dan memiliki semua kota satu warna.'} Stok bank: ${E.housesLeft(v)} rumah, ${E.hotelsLeft(v)} hotel.</p>` : ''}</div>`;
+      ${mine ? `<p class="muted small">${modeOf(v.cfg) === 'direct' ? 'Mode Langsung Bangun: upgrade 1 tingkat tiap kali pionmu mampir di kota milikmu.' : 'Bangun rumah harus merata dan memiliki semua kota satu warna.'} Stok bank: ${E.housesLeft(v)} rumah, ${E.hotelsLeft(v)} hotel.</p>` : ''}</div>`;
   }
   function buildTrade(v, to) {
     const others = v.players.map((p, i) => i).filter(i => i !== myIdx && v.players[i] && !v.players[i].out);
@@ -936,13 +952,22 @@
     pendingCard = null; shownCard = c.id;
     const C = (c.d === 'chance' ? E.CHANCE : E.CHEST)[c.i];
     const el = $('cardPop'), v = currentView();
+    const chance = c.d === 'chance', title = chance ? 'KESEMPATAN' : 'DANA UMUM';
+    // ikon & efek uang per jenis kartu
+    const icon = { move: C.to === 0 ? '🏁' : TL[C.to] && TL[C.to].t === 'rail' ? '🚂' : '📍', near: C.k === 'rail' ? '🚂' : '⚡', back: '⬅️', jail: '🚔',
+      cash: C.a > 0 ? '💰' : '💸', repair: '🔧', each: C.a > 0 ? '🤝' : '🎂', free: '🗝️' }[C.x] || '🎴';
+    const delta = C.x === 'cash' ? C.a : C.x === 'each' ? -C.a * Math.max(1, (v ? v.players.filter((p, i) => p && !p.out && i !== c.p).length : 1)) : 0;
+    const amt = delta ? `<div class="cpAmt ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '+' : '−'}${money(Math.abs(delta))}</div>` : '';
+    const note = C.x === 'free' ? '<div class="cpNote">Kartu disimpan di dompet 🗝️</div>' : '';
     el.className = c.d;
-    el.innerHTML = `<div class="cpHead">${c.d === 'chance' ? '❓ KESEMPATAN' : '💰 DANA UMUM'}</div><div class="cpText">${esc(C.m)}</div>
-      <div class="cpWho">${v && v.players[c.p] ? chip(v, c.p) : ''}</div>`;
+    el.innerHTML = `<div class="cpCard"><div class="cpFace cpBack"><div class="cpBackIn"><span>${chance ? '?' : '💰'}</span><b>${title}</b></div></div>
+      <div class="cpFace cpFront"><div class="cpBand">${title}</div><div class="cpIcon">${icon}</div>
+        <div class="cpText">${esc(C.m)}</div>${amt}${note}
+        <div class="cpFoot">${v && v.players[c.p] ? chip(v, c.p) : ''}<small>MONOPOLI INDONESIA</small></div></div></div>`;
     el.hidden = false;
     Snd.card();
     clearTimeout(cardTimer);
-    cardTimer = setTimeout(() => { el.hidden = true; }, 3800);
+    cardTimer = setTimeout(() => { el.hidden = true; }, 4600);
   }
 
   function renderOver(v) {
@@ -1103,7 +1128,15 @@
     $('players').addEventListener('click', e => { const r = e.target.closest('[data-p]'); if (r) openModal('player', +r.dataset.p); });
     $('status').addEventListener('click', e => { const tc = e.target.closest('[data-tile]'); if (tc) openModal('tile', +tc.dataset.tile); });
     $('cardPop').onclick = () => { $('cardPop').hidden = true; };
-    $('wDeeds').addEventListener('click', e => { const d = e.target.closest('[data-tile]'); if (d) openModal('tile', +d.dataset.tile); });
+    $('wDeeds').addEventListener('click', e => {
+      if (e.target.closest('[data-jc]')) {
+        const v = currentView(), me = v && myIdx >= 0 ? v.players[myIdx] : null;
+        if (me && me.jail && v.turn === myIdx && v.step === 'roll') sendAction('jailcard');
+        else toast('Kartu ini bisa dipakai saat kamu di penjara, di awal giliranmu.');
+        return;
+      }
+      const d = e.target.closest('[data-tile]'); if (d) openModal('tile', +d.dataset.tile);
+    });
     $('wToggle').onclick = () => {
       if (window.innerWidth <= 1000) wallet.open = false; else store.set('mn_wmin', !store.get('mn_wmin', false));
       render();

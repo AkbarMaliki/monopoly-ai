@@ -25,7 +25,7 @@ Pilih **mode permainan** di menu (berlaku untuk lawan bot maupun room online):
 | Mode | Cara membangun |
 | --- | --- |
 | 🚩 **Sewa Bendera** (klasik) | Beli tanah (ditandai bendera). Rumah baru bisa dibangun setelah punya **semua kota satu warna**, harus merata, kapan saja. |
-| 🏠 **Langsung Bangun** | Saat membeli kota bisa **sekalian beli 1–3 rumah**. Setiap kali pionmu berhenti di kota milikmu, boleh menambah rumah sampai hotel — tanpa syarat satu warna. Gadai/tukar hanya terhalang bangunan di kota itu sendiri. |
+| 🏠 **Langsung Bangun** | Saat membeli kota bisa **sekalian beli 1 rumah**. Setiap kali pionmu mampir lagi di kota milikmu, boleh upgrade **1 tingkat** (rumah ke-2, 3, 4, lalu hotel) — tanpa syarat satu warna. Gadai/tukar hanya terhalang bangunan di kota itu sendiri. |
 
 
 - **Lawan Bot**: pilih jumlah bot (1–5), level (Mudah / Sedang / Sulit / Campur), modal awal, batas putaran, lelang, dan kecepatan bot.
@@ -53,8 +53,8 @@ Pilih **mode permainan** di menu (berlaku untuk lawan bot maupun room online):
   Stok bank 32 rumah dan 12 hotel.
 - Gadai = setengah harga; tebus = nilai gadai + 10%. Tidak ada sewa untuk properti yang digadaikan. Harus menjual bangunan
   di satu warna sebelum menggadaikan kotanya.
-- Dadu kembar = main lagi; kembar 3× = penjara. Keluar penjara: lempar kembar, bayar Rp 500rb, atau kartu Bebas Penjara;
-  setelah 3 kali gagal wajib bayar denda lalu jalan.
+- Dadu kembar = main lagi; kembar 3× = penjara. Di penjara pemain **diam 2 giliran**, kecuali lempar dadu kembar (langsung bebas
+  & jalan) atau memakai kartu Bebas dari Penjara (tampil di dompet, klik untuk memakai). Giliran ke-3 otomatis bebas tanpa denda.
 - 16 kartu Kesempatan dan 16 kartu Dana Umum bernuansa Indonesia (THR, tilang, Ketua RT, lomba 17-an, …).
 - Kekurangan uang → fase utang: jual bangunan, gadaikan, atau tawarkan tukar. Kalau tetap tidak cukup, bangkrut:
   aset diserahkan ke pemain penagih (atau kembali ke bank).

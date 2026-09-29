@@ -65,7 +65,7 @@
   ];
   const GROUP_TILES = GROUPS.map((_, k) => TILES.map((t, i) => (t.t === 'prop' && t.g === k ? i : -1)).filter(i => i >= 0));
   const RAILS = [5, 15, 25, 35], UTILS = [12, 28];
-  const GO_SALARY = 200, JAIL_FINE = 50, HOUSES = 32, HOTELS = 12;
+  const GO_SALARY = 200, JAIL_TURNS = 2, HOUSES = 32, HOTELS = 12; // penjara: diam 2 giliran kecuali lempar kembar
   const isOwnable = t => TILES[t] && (TILES[t].t === 'prop' || TILES[t].t === 'rail' || TILES[t].t === 'util');
 
   // ---------- kartu ----------
@@ -108,7 +108,7 @@
   const DECK_NAME = { chance: 'Kesempatan', chest: 'Dana Umum' };
 
   // durasi animasi (ms) — dipakai scene dan host agar sinkron
-  const ANIM = { dice: 1100, step: 170, seg: 250, jump: 750, card: 1700 };
+  const ANIM = { dice: 1100, step: 170, seg: 250, jump: 750, card: 2300 };
 
   // ---------- util ----------
   function money(n) {
@@ -140,6 +140,7 @@
       v: 0, seq: 0, phase: 'lobby',
       cfg: Object.assign({ cash: 1500, rounds: 0, turn: 0, auction: 1, build: 'classic' }, cfg || {}),
       at: -1, // petak tempat pion giliran ini berhenti (untuk mode langsung bangun)
+      bt: -1, // petak yang sudah di-upgrade pada kunjungan ini (mode langsung bangun: 1 upgrade per kunjungan)
       players: [null, null, null, null, null, null],
       own: new Array(40).fill(-1), hs: new Array(40).fill(0), mg: new Array(40).fill(0),
       turn: 0, step: 'roll', round: 0, dice: [3, 4], rid: 0, dbl: 0, again: false,
@@ -157,7 +158,7 @@
   }
   function clearBoard(g) {
     g.own = new Array(40).fill(-1); g.hs = new Array(40).fill(0); g.mg = new Array(40).fill(0);
-    Object.assign(g, { at: -1, step: 'roll', round: 0, dbl: 0, again: false, mv: [], mvq: -1, card: null, auc: null, debt: null, trade: null, tt: 0, tmem: {}, winner: -1, rank: null });
+    Object.assign(g, { at: -1, bt: -1, step: 'roll', round: 0, dbl: 0, again: false, mv: [], mvq: -1, card: null, auc: null, debt: null, trade: null, tt: 0, tmem: {}, winner: -1, rank: null });
     g.players.forEach(p => { if (p) Object.assign(p, { pos: 0, cash: g.cfg.cash, jail: 0, jc: [], out: false }); });
   }
   function startGame(g) {
@@ -222,6 +223,7 @@
     if (direct(g)) {
       if (g.turn !== i || g.at !== t) return 'Bangun rumah saat pionmu berhenti di kota ini';
       if (g.mg[t]) return 'Tebus dulu kota ini';
+      if (g.bt === t) return 'Sudah upgrade di kunjungan ini — upgrade lagi saat mampir berikutnya';
     } else {
       if (!hasMonopoly(g, i, T.g)) return 'Harus memiliki semua kota warna ini';
       if (gt.some(x => g.mg[x])) return 'Tebus dulu kota yang digadaikan';
@@ -260,7 +262,7 @@
     let err;
     if (type === 'build') {
       if ((err = canBuild(g, i, t))) return err;
-      p.cash -= houseCost(t); g.hs[t]++;
+      p.cash -= houseCost(t); g.hs[t]++; g.bt = t;
       log(g, `${p.name} membangun ${g.hs[t] === 5 ? 'hotel' : 'rumah'} di ${T.n}`);
     } else if (type === 'sell') {
       if ((err = canSell(g, i, t))) return err;
@@ -288,10 +290,7 @@
     g.mv.push(m);
   }
   function finish(g) { g.step = g.again ? 'roll' : 'end'; }
-  function cont(g, then) {
-    if (then === 'jailmove') return move(g, g.turn, g.dice[0] + g.dice[1]);
-    return finish(g);
-  }
+  const cont = g => finish(g); // setelah pembayaran lunas, lanjutkan giliran
   function others(g, i) { return aliveList(g).filter(j => j !== i); }
   function transfer(g, i, amt, to) {
     g.players[i].cash -= amt;
@@ -329,7 +328,7 @@
   function land(g, i, o) {
     o = o || {};
     const p = g.players[i], t = p.pos, T = TILES[t];
-    g.at = t;
+    g.at = t; g.bt = -1;
     switch (T.t) {
       case 'prop': case 'rail': case 'util': {
         const ow = g.own[t];
@@ -402,12 +401,8 @@
         return move(g, i, sum);
       }
       p.jail++;
-      if (p.jail > 3) {
-        p.jail = 0; g.again = false;
-        log(g, `${p.name} gagal 3 kali, wajib bayar denda ${money(JAIL_FINE)}`);
-        return pay(g, i, JAIL_FINE, -1, 'jailmove');
-      }
-      log(g, `${p.name} melempar ${a} + ${b} — belum kembar, tetap di penjara.`);
+      const left = JAIL_TURNS + 1 - p.jail;
+      log(g, `${p.name} melempar ${a} + ${b} — belum kembar, diam di penjara${left > 0 ? ` (sisa ${left} giliran)` : ', bebas giliran berikutnya'}.`);
       g.step = 'end';
       return;
     }
@@ -423,8 +418,11 @@
     const n = nextAlive(g, g.turn);
     if (n < 0) return;
     if (n <= g.turn) g.round++;
-    g.turn = n; g.step = 'roll'; g.dbl = 0; g.again = false; g.tt = 0; g.at = -1;
+    g.turn = n; g.step = 'roll'; g.dbl = 0; g.again = false; g.tt = 0; g.at = -1; g.bt = -1;
     if (aliveList(g).length > 1 && !(g.cfg.rounds && g.round > g.cfg.rounds)) logTurn(g);
+    // masa tahanan habis (sudah diam JAIL_TURNS giliran) → giliran ini jalan normal
+    const p = g.players[n];
+    if (p.jail > JAIL_TURNS) { p.jail = 0; log(g, `${p.name} selesai masa tahanan dan bebas dari penjara`); }
   }
 
   // ---------- lelang ----------
@@ -581,13 +579,6 @@
     switch (g.step) {
       case 'roll':
         if (t === 'roll') { roll(g); return null; }
-        if (t === 'jailpay') {
-          if (!p.jail) return 'Kamu tidak di penjara';
-          if (p.cash < JAIL_FINE) return 'Uang tidak cukup';
-          p.cash -= JAIL_FINE; p.jail = 0;
-          log(g, `${p.name} membayar denda ${money(JAIL_FINE)} dan bebas`);
-          return null;
-        }
         if (t === 'jailcard') {
           if (!p.jail) return 'Kamu tidak di penjara';
           if (!p.jc.length) return 'Tidak punya kartu bebas penjara';
@@ -601,8 +592,8 @@
       case 'buy': {
         const pos = p.pos, T = TILES[pos];
         if (t === 'buy') {
-          // mode langsung bangun: boleh sekalian beli 1–4 rumah
-          const nh = Math.max(0, Math.min(4, d.h | 0));
+          // mode langsung bangun: boleh sekalian beli 1 rumah (1 upgrade per kunjungan)
+          const nh = Math.max(0, Math.min(1, d.h | 0));
           if (nh && (!direct(g) || T.t !== 'prop')) return 'Rumah tidak bisa dibeli langsung di mode ini';
           if (nh > housesLeft(g)) return 'Stok rumah bank tidak cukup';
           if (p.cash < T.p + nh * houseCost(pos)) return 'Uang tidak cukup';
@@ -809,8 +800,7 @@
       if (p.jail) {
         const unowned = range(40).filter(t => isOwnable(t) && g.own[t] < 0).length;
         const early = unowned > 8;
-        if (p.jc.length && (early || lvl === 1)) return { t: 'jailcard' };
-        if (early && p.cash >= JAIL_FINE + reserveOf(g, i)) return { t: 'jailpay' };
+        if (p.jc.length && (early || lvl === 1 || p.jail >= JAIL_TURNS)) return { t: 'jailcard' };
       }
       return { t: 'roll' };
     }
@@ -830,7 +820,7 @@
   }
 
   return Object.assign(api, {
-    GROUPS, TILES, GROUP_TILES, RAILS, UTILS, CHANCE, CHEST, DECK_NAME, ANIM, GO_SALARY, JAIL_FINE, HOUSES, HOTELS,
+    GROUPS, TILES, GROUP_TILES, RAILS, UTILS, CHANCE, CHEST, DECK_NAME, ANIM, GO_SALARY, JAIL_TURNS, HOUSES, HOTELS,
     money, isOwnable, createGame, addPlayer, startGame, resetGame, removePlayer,
     rent, hasMonopoly, houseCost, mortValue, unmortCost, housesLeft, hotelsLeft, worth, liquidity,
     canBuild, canSell, canMort, canUnmort, tradable, validTrade, tradeView, tradeOk,
