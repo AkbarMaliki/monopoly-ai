@@ -489,20 +489,44 @@
     el.hidden = v.phase === 'lobby';
     if (el.hidden) return;
     const w = E.whoActs(v);
+    const worths = v.players.map((p, i) => (p && !p.out ? E.worth(v, i) : -1));
+    const maxW = Math.max(1, ...worths);
+    const order = worths.map((x, i) => [x, i]).filter(([x]) => x >= 0).sort((a, b) => b[0] - a[0]).map(([, i]) => i);
+    const MEDAL = ['🥇', '🥈', '🥉'];
     const html = v.players.map((p, i) => {
       if (!p) return '';
-      const n = v.own.filter(o => o === i).length;
+      const rank = order.indexOf(i);
+      const owned = [];
+      for (let t = 0; t < 40; t++) if (v.own[t] === i) owned.push(t);
+      // chip kecil per properti, berwarna sesuai grupnya
+      const chips = owned.map(t => {
+        const T = TL[t], col = T.t === 'prop' ? E.GROUPS[T.g].c : T.t === 'rail' ? '#3a3f4a' : '#2f6f8f';
+        const full = T.t === 'prop' && E.hasMonopoly(v, i, T.g);
+        return `<i class="${v.mg[t] ? 'mg' : ''}${full ? ' full' : ''}" style="background:${col}" title="${esc(T.n)}${v.mg[t] ? ' (digadaikan)' : ''}"></i>`;
+      }).join('');
       const tags = [
-        p.bot ? `<span title="Bot ${LEVEL_NAME[p.bot]}">🤖</span>` : '',
-        mode === 'online' && p.id === Net.host ? '<span title="Host">👑</span>' : '',
-        p.away && !p.out ? '<span title="Terputus">📴</span>' : '',
-        p.jail ? '<span title="Di penjara">🔒</span>' : '',
-        p.jc && p.jc.length ? `<span title="Kartu bebas penjara">🎫${p.jc.length > 1 ? p.jc.length : ''}</span>` : '',
+        p.bot ? `<span class="tg bot">BOT ${LEVEL_NAME[p.bot].toUpperCase()}</span>` : '',
+        mode === 'online' && p.id === Net.host ? '<span class="tg host">HOST</span>' : '',
+        p.away && !p.out ? '<span class="tg off">OFFLINE</span>' : '',
+        p.jail && !p.out ? '<span class="tg jail">🔒 PENJARA</span>' : '',
+        p.jc && p.jc.length ? `<span class="tg card" title="Kartu bebas penjara">🎫${p.jc.length > 1 ? '×' + p.jc.length : ''}</span>` : '',
       ].join('');
-      const cls = ['pRow', i === v.turn && v.phase === 'play' ? 'turn' : '', i === w ? 'act' : '', p.out ? 'out' : '', i === myIdx ? 'me' : ''].join(' ');
-      return `<div class="${cls}" data-p="${i}"><i class="dot" style="background:${PCOL[i]}"></i>
-        <div class="pMain"><div class="pName">${esc(p.name)}${i === myIdx ? ' <small>(kamu)</small>' : ''} ${tags}</div>
-        <div class="pSub">${p.out ? 'Bangkrut' : `<b>${money(p.cash)}</b> · ${n} aset`}</div></div>
+      const ini = p.name.trim().split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase() || '?';
+      const turn = i === v.turn && v.phase === 'play' && !p.out, bidding = i === w && !turn && v.phase === 'play';
+      const cls = ['pCard', turn ? 'turn' : '', bidding ? 'act' : '', p.out ? 'out' : '', i === myIdx ? 'me' : ''].join(' ');
+      const medal = !p.out && rank >= 0 && rank < 3 && order.length > 1 ? `<span class="medal" title="Peringkat kekayaan #${rank + 1}">${MEDAL[rank]}</span>` : '';
+      const money2 = p.out ? '<div class="pCash dead">BANGKRUT</div>'
+        : `<div class="pCash">${money(p.cash)}<small> · ${owned.length} aset</small></div>
+           <div class="pWorth" title="Total kekayaan ${money(worths[i])}"><i style="width:${Math.round(worths[i] / maxW * 100)}%"></i></div>`;
+      const ribbon = turn ? '<div class="pTurn">GILIRAN</div>' : bidding ? `<div class="pTurn act">${v.trade ? 'MENJAWAB' : 'MENAWAR'}</div>` : '';
+      return `<div class="${cls}" data-p="${i}" style="--c:${PCOL[i]}">
+        <div class="pAv"><span>${esc(ini)}</span>${p.bot ? '<em>🤖</em>' : ''}</div>
+        <div class="pMain">
+          <div class="pName"><b>${esc(p.name)}</b>${i === myIdx ? '<small>kamu</small>' : ''}${medal}</div>
+          ${money2}
+          ${chips ? `<div class="pProps">${chips}</div>` : ''}
+          ${tags ? `<div class="pTags">${tags}</div>` : ''}
+        </div>${ribbon}
         <div class="pt" data-tp="${i}"><i></i></div></div>`;
     }).join('');
     if (el.dataset.h !== html) { el.dataset.h = html; el.innerHTML = html; }
@@ -590,7 +614,13 @@
     const bi = $('bidIn');
     if (bi) { bi.addEventListener('input', bidPreview); bidPreview(); }
   }
-  function bidPreview() { const bi = $('bidIn'), pv = $('bidPv'); if (bi && pv) pv.textContent = money(+bi.value || 0); }
+  function bidPreview() {
+    const bi = $('bidIn');
+    if (!bi) return;
+    const m = money(+bi.value || 0);
+    if ($('bidPv')) $('bidPv').textContent = m;
+    if ($('bidGo')) $('bidGo').textContent = m;
+  }
   function btn(a, label, cls, dis, title) {
     return `<button data-a="${a}" class="${cls || ''}"${dis ? ' disabled' : ''}${title ? ` title="${esc(title)}"` : ''}>${label}</button>`;
   }
@@ -612,19 +642,7 @@
       return '';
     }
     if (Scene3D.busy()) return '';
-    if (v.step === 'auction' && v.auc) {
-      const a = v.auc, T = TL[a.t], mine = a.cur === myIdx && me && !me.out;
-      const top = a.by >= 0 ? `${money(a.bid)} oleh ${chip(v, a.by)}` : 'belum ada';
-      let body = `<div class="aHead">🔨 Lelang ${tileChip(a.t)} <small>harga ${money(T.p)}</small></div>
-        <div class="aInfo">Tawaran tertinggi: <b>${top}</b></div>`;
-      if (mine) {
-        const min = a.bid + 10;
-        body += `<div class="bidRow"><input id="bidIn" type="number" min="${a.bid + 1}" max="${me.cash}" step="10" value="${Math.min(min, me.cash)}"><span id="bidPv"></span></div>
-          <div class="aBtns small">${[10, 50, 100].map(x => `<button data-a="bidplus" data-v="${x}">+${money(x)}</button>`).join('')}</div>
-          <div class="aBtns">${btn('bid', '🔨 Tawar', 'go', wait || me.cash <= a.bid)}${btn('pass', 'Lewati', 'no', wait)}</div>${timer}`;
-      } else body += `<div class="aInfo muted">Menunggu tawaran ${chip(v, a.cur)}…</div>`;
-      return body;
-    }
+    if (v.step === 'auction' && v.auc) return auctionHTML(v, me, wait, timer);
     if (!me || me.out || v.turn !== myIdx) return '';
     switch (v.step) {
       case 'roll':
@@ -651,6 +669,44 @@
         return `<div class="aBtns">${btn('end', '✔ Akhiri Giliran <kbd>Spasi</kbd>', 'go big', wait)}</div>${TOOLS}${timer}`;
     }
     return '';
+  }
+  function auctionHTML(v, me, wait, timer) {
+    const a = v.auc, T = TL[a.t], mine = a.cur === myIdx && me && !me.out;
+    const col = T.t === 'prop' ? E.GROUPS[T.g].c : T.t === 'rail' ? '#3a3f4a' : '#2f6f8f';
+    const icon = T.t === 'rail' ? '🚆' : T.t === 'util' ? (T.n === 'PLN' ? '⚡' : '🚰') : '🏙️';
+    // peserta: 👑 tertinggi, … sedang menawar, "lewat" sudah mundur
+    const people = v.players.map((p, i) => {
+      if (!p || p.out) return '';
+      const st = i === a.by ? 'top' : !a.act.includes(i) ? 'gone' : i === a.cur ? 'now' : '';
+      const lab = { top: '👑', gone: 'lewat', now: '…' }[st] || '';
+      return `<span class="ap ${st}" style="--c:${PCOL[i]}" title="${esc(p.name)}"><i></i>${esc(i === myIdx ? 'Kamu' : p.name)}${lab ? `<small>${lab}</small>` : ''}</span>`;
+    }).join('');
+    let h = `<div class="auc">
+      <div class="aucTop"><span class="gavel">🔨</span><b>LELANG</b><small>penawar tertinggi mendapatkan properti</small></div>
+      <div class="aucBody">
+        <div class="miniDeed" data-tile="${a.t}" style="--c:${col}"><div class="mdH"><small>HAK MILIK</small><b>${esc(T.n.replace('Stasiun ', 'St. '))}</b></div>
+          <div class="mdB"><span>${icon}</span><small>Harga bank</small><b>${money(T.p)}</b></div></div>
+        <div class="aucBid">
+          <small>Tawaran tertinggi</small>
+          <div class="aucAmt${a.by >= 0 ? '' : ' none'}">${a.by >= 0 ? money(a.bid) : 'Belum ada'}</div>
+          <div class="aucBy">${a.by >= 0 ? 'oleh ' + chip(v, a.by) : 'Jadilah penawar pertama!'}</div>
+          <div class="aucPeople">${people}</div>
+        </div>
+      </div>`;
+    if (mine) {
+      const min = a.bid + 1, max = me.cash, val = Math.min(a.bid + 10, max), can = max > a.bid;
+      const plus = [10, 50, 100].map(x => `<button data-a="bidplus" data-v="${x}"${can ? '' : ' disabled'}>+${money(x)}</button>`).join('');
+      h += `<div class="bidBox">
+        <div class="bidTop"><span>Tawaranmu</span><b id="bidPv">${money(val)}</b><small>uangmu ${money(me.cash)}</small></div>
+        <input id="bidIn" type="range" min="${min}" max="${Math.max(min, max)}" step="1" value="${val}"${can ? '' : ' disabled'}>
+        <div class="aBtns small">${plus}<button data-a="bidset" data-v="${T.p}"${can && T.p > a.bid && T.p <= max ? '' : ' disabled'}>Harga bank</button></div>
+        <div class="aBtns">${btn('bid', `🔨 Tawar <span id="bidGo">${money(val)}</span>`, 'go', wait || !can)}${btn('pass', 'Lewati', 'no', wait)}</div>
+      </div>${timer}</div>`;
+    } else {
+      const who = a.cur >= 0 && v.players[a.cur] ? `${chip(v, a.cur)} sedang menimbang tawaran<span class="dots"><i></i><i></i><i></i></span>` : '';
+      h += `<div class="aucWait">${who}</div></div>`;
+    }
+    return h;
   }
   function rentLine(t) {
     const T = TL[t];
@@ -969,9 +1025,13 @@
       const a = b.dataset.a;
       if (a === 'assets') return openModal('assets');
       if (a === 'trade') return openModal('trade');
-      if (a === 'bidplus') {
+      if (a === 'bidplus' || a === 'bidset') {
         const v = currentView(), bi = $('bidIn');
-        if (bi && v && v.auc) { bi.value = Math.min(v.players[myIdx].cash, Math.max(+bi.value || 0, v.auc.bid) + +b.dataset.v); bidPreview(); }
+        if (bi && v && v.auc) {
+          const base = a === 'bidset' ? 0 : Math.max(+bi.value || 0, v.auc.bid);
+          bi.value = Math.max(v.auc.bid + 1, Math.min(v.players[myIdx].cash, base + +b.dataset.v));
+          bidPreview();
+        }
         return;
       }
       if (a === 'bid') return sendAction('bid', { a: Math.round(+$('bidIn').value || 0) });
