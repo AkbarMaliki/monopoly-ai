@@ -505,7 +505,7 @@
         return `<i class="${v.mg[t] ? 'mg' : ''}${full ? ' full' : ''}" style="background:${col}" title="${esc(T.n)}${v.mg[t] ? ' (digadaikan)' : ''}"></i>`;
       }).join('');
       const tags = [
-        p.bot ? `<span class="tg bot">BOT ${LEVEL_NAME[p.bot].toUpperCase()}</span>` : '',
+        p.bot ? `<span class="tg bot" title="Bot ${LEVEL_NAME[p.bot]}">${LEVEL_NAME[p.bot].toUpperCase()}</span>` : '',
         mode === 'online' && p.id === Net.host ? '<span class="tg host">HOST</span>' : '',
         p.away && !p.out ? '<span class="tg off">OFFLINE</span>' : '',
         p.jail && !p.out ? '<span class="tg jail">🔒 PENJARA</span>' : '',
@@ -524,8 +524,7 @@
         <div class="pMain">
           <div class="pName"><b>${esc(p.name)}</b>${i === myIdx ? '<small>kamu</small>' : ''}${medal}</div>
           ${money2}
-          ${chips ? `<div class="pProps">${chips}</div>` : ''}
-          ${tags ? `<div class="pTags">${tags}</div>` : ''}
+          ${chips || tags ? `<div class="pMeta">${chips ? `<span class="pProps">${chips}</span>` : ''}${tags}</div>` : ''}
         </div>${ribbon}
         <div class="pt" data-tp="${i}"><i></i></div></div>`;
     }).join('');
