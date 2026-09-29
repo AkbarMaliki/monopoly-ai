@@ -78,6 +78,11 @@
       <h1>MONOPOLI</h1>
       <p class="sub"><span class="flag"></span> Edisi Indonesia · 3D</p>
       <label class="field">Nama kamu <input id="nameIn" maxlength="16" placeholder="Pemain"></label>
+      <div class="modeHead">Mode permainan</div>
+      <div class="modes">
+        <button data-mode="classic" class="on"><i>🚩</i><b>Sewa Bendera</b><small>Klasik: beli tanah, rumah baru bisa dibangun setelah punya satu warna lengkap</small></button>
+        <button data-mode="direct"><i>🏠</i><b>Langsung Bangun</b><small>Beli tanah + rumah sekaligus, upgrade tiap berhenti di propertimu</small></button>
+      </div>
       <div class="tabs">
         <button data-tab="bot" class="on">🤖 Lawan Bot</button>
         <button data-tab="online">🌐 Online</button>
@@ -133,7 +138,8 @@
         <summary>❓ Cara main</summary>
         <ul>
           <li>Lempar dadu, jalankan pion, lalu beli kota/stasiun/utilitas yang belum dimiliki. Kalau tidak dibeli, properti dilelang.</li>
-          <li>Kuasai <b>semua kota satu warna</b> agar sewa jadi 2× dan bisa membangun rumah (merata) sampai hotel.</li>
+          <li><b>🚩 Sewa Bendera</b> (klasik): kuasai <b>semua kota satu warna</b> agar sewa jadi 2× dan bisa membangun rumah (merata) sampai hotel.</li>
+          <li><b>🏠 Langsung Bangun</b>: saat membeli kota, bisa sekalian beli 1–4 rumah. Setiap berhenti di kota milikmu, boleh menambah rumah lagi sampai hotel — tanpa perlu satu warna lengkap.</li>
           <li>Dadu kembar = main lagi; kembar 3× langsung masuk penjara.</li>
           <li>Kekurangan uang? Jual rumah atau gadaikan aset lewat 🏠 Aset. Kalau tetap tidak cukup, bangkrut.</li>
           <li>Tukar properti dengan pemain lain lewat 🤝 Tukar saat giliranmu.</li>

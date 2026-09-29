@@ -20,6 +20,14 @@ node tests/engine.test.js
 
 ## Cara main
 
+Pilih **mode permainan** di menu (berlaku untuk lawan bot maupun room online):
+
+| Mode | Cara membangun |
+| --- | --- |
+| 🚩 **Sewa Bendera** (klasik) | Beli tanah (ditandai bendera). Rumah baru bisa dibangun setelah punya **semua kota satu warna**, harus merata, kapan saja. |
+| 🏠 **Langsung Bangun** | Saat membeli kota bisa **sekalian beli 1–3 rumah**. Setiap kali pionmu berhenti di kota milikmu, boleh menambah rumah sampai hotel — tanpa syarat satu warna. Gadai/tukar hanya terhalang bangunan di kota itu sendiri. |
+
+
 - **Lawan Bot**: pilih jumlah bot (1–5), level (Mudah / Sedang / Sulit / Campur), modal awal, batas putaran, lelang, dan kecepatan bot.
 - **Online**:
   - **Buat Room Baru** → dapat kode 5 karakter + link undangan (`?room=KODE`). Host bisa menambah/menghapus bot di lobby, lalu tekan **Mulai Game**.

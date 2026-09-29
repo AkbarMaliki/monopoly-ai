@@ -270,6 +270,60 @@ test('bot menolak tawaran murah yang memberi lawan monopoli', () => {
   assert.strictEqual(E.botDecide(g, 1).t, 'tradeok');
 });
 
+console.log('Mode Langsung Bangun');
+test('beli tanah + rumah sekaligus, bangun hanya di petak tempat berhenti', () => {
+  const g = newGame(2, { build: 'direct' });
+  E.rng = diceSeq([[3, 3]]);
+  assert.strictEqual(E.act(g, 0, 'roll'), null); // 6 Kupang (kembar → main lagi)
+  assert.strictEqual(g.step, 'buy');
+  ok(g, 0, 'buy', { h: 2 });
+  assert.strictEqual(g.own[6], 0);
+  assert.strictEqual(g.hs[6], 2);
+  assert.strictEqual(g.players[0].cash, 1500 - 100 - 2 * 50);
+  ok(g, 0, 'build', { t: 6 }); // tanpa syarat satu warna
+  assert.strictEqual(g.hs[6], 3);
+  g.own[1] = 0;
+  assert.strictEqual(E.act(g, 0, 'build', { t: 1 }), 'Bangun rumah saat pionmu berhenti di kota ini');
+  assert.strictEqual(E.rent(g, 6, 7), 270);
+  ok(g, 0, 'sell', { t: 6 }); // tanpa aturan jual merata
+  assert(E.canMort(g, 0, 6));
+  assert.strictEqual(E.canMort(g, 0, 1), null);
+  assert(E.tradable(g, 0, 1) && !E.tradable(g, 0, 6));
+  E.rng = diceSeq([[1, 2]]);
+  ok(g, 0, 'roll'); // lempar lagi → 9 Palu
+  assert(E.canBuild(g, 0, 6));
+});
+test('mode klasik menolak beli rumah langsung', () => {
+  const g = newGame(2);
+  E.rng = diceSeq([[3, 3]]);
+  ok(g, 0, 'roll');
+  assert.strictEqual(E.act(g, 0, 'buy', { h: 1 }), 'Rumah tidak bisa dibeli langsung di mode ini');
+});
+test('150 game bot mode langsung bangun selesai', () => {
+  let ended = 0, builds = 0;
+  for (let s = 1; s <= 150; s++) {
+    E.rng = seeded(s * 104729);
+    const n = 2 + (s % 4);
+    const g = E.createGame({ rounds: s % 2 ? 40 : 0, build: 'direct' });
+    for (let i = 0; i < n; i++) E.addPlayer(g, i, { id: 'b' + i, name: 'B' + i, bot: 1 + ((s + i) % 3) });
+    E.startGame(g);
+    let steps = 0;
+    while (g.phase === 'play' && steps < 40000) {
+      const w = E.whoActs(g), d = E.botDecide(g, w);
+      assert(d, `bot tanpa keputusan (step ${g.step})`);
+      const err = E.act(g, w, d.t, d.d);
+      assert.strictEqual(err, null, `aksi bot gagal: ${d.t} → ${err}`);
+      if (d.t === 'build') builds++;
+      g.players.forEach(p => { if (p && !p.out) assert(p.cash >= 0, 'uang negatif'); });
+      assert(E.housesLeft(g) >= 0 && E.hotelsLeft(g) >= 0);
+      steps++;
+    }
+    if (g.phase === 'over') ended++;
+  }
+  console.log(`    ${ended}/150 selesai · ${builds} bangun`);
+  assert(ended >= 145 && builds > 0);
+});
+
 console.log('Simulasi bot');
 test('300 game bot selesai tanpa error & invariant terjaga', () => {
   let ended = 0, turns = 0, trades = 0, auctions = 0, builds = 0;

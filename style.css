@@ -450,3 +450,30 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 .jailBox + .aBtns { gap: 8px; }
 #actions .jailBox + .aBtns button { font-size: 12.5px; padding: 9px 6px; gap: 6px; white-space: nowrap; }
 #actions .jailBox + .aBtns .ic { width: 22px; height: 22px; font-size: 12px; }
+
+/* ---------- pilihan mode permainan ---------- */
+.modeHead { font-size: 12px; color: var(--muted); margin-bottom: -4px; }
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.modes button { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 10px 11px 10px;
+  border-radius: 12px; background: #0f141d; border: 1px solid var(--line); transition: border-color .2s, background .2s, transform .1s; }
+.modes button i { font-style: normal; font-size: 22px; line-height: 1; margin-bottom: 3px; }
+.modes button b { font-size: 13.5px; }
+.modes button small { font-size: 10.5px; color: var(--muted); line-height: 1.3; }
+.modes button.on { border-color: rgba(255, 211, 106, .8); background: linear-gradient(160deg, rgba(255, 211, 106, .16), rgba(15, 20, 29, .9) 70%);
+  box-shadow: 0 0 0 1px rgba(255, 211, 106, .3), 0 6px 16px rgba(0, 0, 0, .35); }
+.modes button.on::after { content: '✔'; position: absolute; top: 8px; right: 9px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 11px; font-weight: 900; color: #1b1405; background: var(--gold); }
+
+/* ---------- mode langsung bangun: paket rumah & upgrade ---------- */
+.pkgHead { font-size: 11px; color: var(--muted); margin: -2px 0 -4px; }
+#actions .pkgs button { gap: 6px; padding: 5px 4px; }
+.pkgH { display: inline-flex; gap: 1px; }
+.house, .hotel { display: inline-block; }
+.pkgH .house, .upHs .house { width: 10px; height: 10px; background: #2ecc5f; clip-path: polygon(50% 0, 100% 45%, 100% 100%, 0 100%, 0 45%); }
+.upHs { display: flex; gap: 3px; margin: 2px 0; }
+.upHs .house { width: 14px; height: 14px; }
+.upHs .house.ghost { background: rgba(255, 255, 255, .15); }
+.upHs .hotel { width: 34px; height: 15px; background: #e03131; clip-path: polygon(20% 0, 80% 0, 100% 45%, 100% 100%, 0 100%, 0 45%); }
+.upBox { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-radius: 12px; background: rgba(47, 125, 225, .12); border: 1px solid rgba(122, 184, 255, .3); }
+.upBox .miniDeed { width: 70px; }
+.upBox .bRent b { color: #5dff9f; }

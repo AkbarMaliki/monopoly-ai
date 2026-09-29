@@ -138,7 +138,8 @@
   function createGame(cfg) {
     return {
       v: 0, seq: 0, phase: 'lobby',
-      cfg: Object.assign({ cash: 1500, rounds: 0, turn: 0, auction: 1 }, cfg || {}),
+      cfg: Object.assign({ cash: 1500, rounds: 0, turn: 0, auction: 1, build: 'classic' }, cfg || {}),
+      at: -1, // petak tempat pion giliran ini berhenti (untuk mode langsung bangun)
       players: [null, null, null, null, null, null],
       own: new Array(40).fill(-1), hs: new Array(40).fill(0), mg: new Array(40).fill(0),
       turn: 0, step: 'roll', round: 0, dice: [3, 4], rid: 0, dbl: 0, again: false,
@@ -156,7 +157,7 @@
   }
   function clearBoard(g) {
     g.own = new Array(40).fill(-1); g.hs = new Array(40).fill(0); g.mg = new Array(40).fill(0);
-    Object.assign(g, { step: 'roll', round: 0, dbl: 0, again: false, mv: [], mvq: -1, card: null, auc: null, debt: null, trade: null, tt: 0, tmem: {}, winner: -1, rank: null });
+    Object.assign(g, { at: -1, step: 'roll', round: 0, dbl: 0, again: false, mv: [], mvq: -1, card: null, auc: null, debt: null, trade: null, tt: 0, tmem: {}, winner: -1, rank: null });
     g.players.forEach(p => { if (p) Object.assign(p, { pos: 0, cash: g.cfg.cash, jail: 0, jc: [], out: false }); });
   }
   function startGame(g) {
@@ -210,16 +211,23 @@
   }
 
   // ---------- manajemen properti ----------
+  /** Mode "Langsung Bangun": rumah dibeli per petak (tanpa syarat satu warna), hanya di petak tempat pion berhenti. */
+  const direct = g => g.cfg.build === 'direct';
   function canBuild(g, i, t) {
     const T = TILES[t];
     if (!T || T.t !== 'prop') return 'Hanya kota yang bisa dibangun';
     if (g.own[t] !== i) return 'Bukan milikmu';
     const gt = GROUP_TILES[T.g];
-    if (!hasMonopoly(g, i, T.g)) return 'Harus memiliki semua kota warna ini';
-    if (gt.some(x => g.mg[x])) return 'Tebus dulu kota yang digadaikan';
     const h = g.hs[t];
+    if (direct(g)) {
+      if (g.turn !== i || g.at !== t) return 'Bangun rumah saat pionmu berhenti di kota ini';
+      if (g.mg[t]) return 'Tebus dulu kota ini';
+    } else {
+      if (!hasMonopoly(g, i, T.g)) return 'Harus memiliki semua kota warna ini';
+      if (gt.some(x => g.mg[x])) return 'Tebus dulu kota yang digadaikan';
+    }
     if (h >= 5) return 'Sudah ada hotel';
-    if (gt.some(x => g.hs[x] < h)) return 'Bangun merata: kota lain dulu';
+    if (!direct(g) && gt.some(x => g.hs[x] < h)) return 'Bangun merata: kota lain dulu';
     if (g.players[i].cash < houseCost(t)) return 'Uang tidak cukup';
     if (h === 4 ? hotelsLeft(g) < 1 : housesLeft(g) < 1) return h === 4 ? 'Stok hotel bank habis' : 'Stok rumah bank habis';
     return null;
@@ -229,13 +237,15 @@
     if (!T || T.t !== 'prop' || g.own[t] !== i) return 'Bukan milikmu';
     const h = g.hs[t];
     if (!h) return 'Tidak ada bangunan';
-    if (GROUP_TILES[T.g].some(x => g.hs[x] > h)) return 'Jual merata: kota lain dulu';
+    if (!direct(g) && GROUP_TILES[T.g].some(x => g.hs[x] > h)) return 'Jual merata: kota lain dulu';
     return null;
   }
+  /** Petak yang bangunannya menghalangi gadai/tukar: satu warna (klasik) atau petak itu saja (langsung bangun). */
+  const blockTiles = (g, t) => (TILES[t].t !== 'prop' ? [] : direct(g) ? [t] : GROUP_TILES[TILES[t].g]);
   function canMort(g, i, t) {
     if (!isOwnable(t) || g.own[t] !== i) return 'Bukan milikmu';
     if (g.mg[t]) return 'Sudah digadaikan';
-    if (TILES[t].t === 'prop' && GROUP_TILES[TILES[t].g].some(x => g.hs[x] > 0)) return 'Jual dulu bangunan di warna ini';
+    if (blockTiles(g, t).some(x => g.hs[x] > 0)) return direct(g) ? 'Jual dulu bangunan di kota ini' : 'Jual dulu bangunan di warna ini';
     return null;
   }
   function canUnmort(g, i, t) {
@@ -303,7 +313,7 @@
   function goJail(g, i) {
     const p = g.players[i];
     addMv(g, { p: i, f: p.pos, j: 1 });
-    p.pos = 10; p.jail = 1;
+    p.pos = 10; p.jail = 1; g.at = -1;
     g.again = false; g.dbl = 0;
     log(g, `${p.name} masuk penjara! 🚔`);
     g.step = 'end';
@@ -319,6 +329,7 @@
   function land(g, i, o) {
     o = o || {};
     const p = g.players[i], t = p.pos, T = TILES[t];
+    g.at = t;
     switch (T.t) {
       case 'prop': case 'rail': case 'util': {
         const ow = g.own[t];
@@ -412,7 +423,7 @@
     const n = nextAlive(g, g.turn);
     if (n < 0) return;
     if (n <= g.turn) g.round++;
-    g.turn = n; g.step = 'roll'; g.dbl = 0; g.again = false; g.tt = 0;
+    g.turn = n; g.step = 'roll'; g.dbl = 0; g.again = false; g.tt = 0; g.at = -1;
     if (aliveList(g).length > 1 && !(g.cfg.rounds && g.round > g.cfg.rounds)) logTurn(g);
   }
 
@@ -443,7 +454,7 @@
   // ---------- tukar ----------
   function tradable(g, i, t) {
     if (!isOwnable(t) || g.own[t] !== i) return false;
-    return TILES[t].t !== 'prop' || !GROUP_TILES[TILES[t].g].some(x => g.hs[x] > 0);
+    return !blockTiles(g, t).some(x => g.hs[x] > 0);
   }
   function validTrade(g, tr) {
     if (!tr || !alive(g, tr.from) || !alive(g, tr.to) || tr.from === tr.to) return 'Pemain tidak valid';
@@ -590,9 +601,14 @@
       case 'buy': {
         const pos = p.pos, T = TILES[pos];
         if (t === 'buy') {
-          if (p.cash < T.p) return 'Uang tidak cukup';
+          // mode langsung bangun: boleh sekalian beli 1–4 rumah
+          const nh = Math.max(0, Math.min(4, d.h | 0));
+          if (nh && (!direct(g) || T.t !== 'prop')) return 'Rumah tidak bisa dibeli langsung di mode ini';
+          if (nh > housesLeft(g)) return 'Stok rumah bank tidak cukup';
+          if (p.cash < T.p + nh * houseCost(pos)) return 'Uang tidak cukup';
           p.cash -= T.p; g.own[pos] = i;
           log(g, `${p.name} membeli ${T.n} seharga ${money(T.p)}`);
+          for (let k = 0; k < nh; k++) manage(g, i, 'build', pos);
           finish(g);
           return null;
         }
