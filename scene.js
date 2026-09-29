@@ -11,10 +11,12 @@ window.Scene3D = (() => {
   let renderer, scene, camera, controls, opts = {}, maxAniso = 1, canvasEl;
   let view = null, first = true, lastRid = -1, lastMid = -1, tagIdx = -1, focusIdx = -1, hover = -1, uiFocus = -1;
   let hlFocus, hlHover, turnRing, tagEl, diceAnim = null, cur = null, wasBusy = false;
-  const tokens = [], diceM = [], ownTabs = {}, houseGroups = {}, mortPlanes = {}, queue = [];
+  const tokens = [], diceM = [], ownTabs = {}, houseGroups = {}, mortPlanes = {}, flags = {}, queue = [], pops = [];
   const shared = {};
 
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  /** Warna hex (sRGB) → linear, karena renderer memakai output sRGB (tanpa ini warna jadi pucat). */
+  const lin = c => new THREE.Color(c).convertSRGBToLinear();
   function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
   function tex(cv) { const t = new THREE.CanvasTexture(cv); t.encoding = THREE.sRGBEncoding; t.anisotropy = maxAniso; return t; }
   function rr(x, px, py, w, h, r) {
@@ -232,27 +234,62 @@ window.Scene3D = (() => {
   function makePawn(col) {
     const pts = [[0, 0], [0.2, 0], [0.21, 0.035], [0.16, 0.07], [0.11, 0.12], [0.075, 0.25], [0.11, 0.28], [0.07, 0.31], [0.1, 0.35], [0.125, 0.41], [0.11, 0.47], [0.06, 0.51], [0, 0.52]]
       .map(([a, b]) => new THREE.Vector2(a, b));
-    const m = new THREE.Mesh(new THREE.LatheGeometry(pts, 28), new THREE.MeshStandardMaterial({ color: col, roughness: 0.3, metalness: 0.35 }));
+    const m = new THREE.Mesh(new THREE.LatheGeometry(pts, 28), new THREE.MeshStandardMaterial({ color: lin(col), roughness: 0.3, metalness: 0.35 }));
     m.castShadow = true;
     m.scale.setScalar(1.05);
     return m;
   }
+  /** Atap pelana (prisma segitiga) dengan bubungan searah sumbu x. */
+  function roofGeo(w, h, len) {
+    const s = new THREE.Shape();
+    s.moveTo(-w / 2, 0); s.lineTo(w / 2, 0); s.lineTo(0, h); s.closePath();
+    const geo = new THREE.ExtrudeGeometry(s, { depth: len, bevelEnabled: false });
+    geo.translate(0, 0, -len / 2); geo.rotateY(Math.PI / 2);
+    return geo;
+  }
+  /** Rumah hijau / hotel merah ala bidak Monopoli klasik. */
   function makeHouse(hotel) {
-    const g = new THREE.Group();
-    const w = hotel ? 0.42 : 0.17, d = hotel ? 0.2 : 0.17, h = hotel ? 0.17 : 0.12;
+    if (!shared.houseGeo) {
+      shared.houseGeo = [new THREE.BoxGeometry(0.2, 0.17, 0.2), roofGeo(0.25, 0.14, 0.23)];
+      shared.hotelGeo = [new THREE.BoxGeometry(0.5, 0.24, 0.24), roofGeo(0.29, 0.15, 0.55)];
+    }
+    const [bg, rg] = hotel ? shared.hotelGeo : shared.houseGeo, bh = hotel ? 0.24 : 0.17;
     const mat = hotel ? shared.hotelMat : shared.houseMat;
-    const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    body.position.y = h / 2; body.castShadow = true;
-    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0, 1, 1, 4, 1), mat);
-    roof.scale.set(w * 0.74, hotel ? 0.1 : 0.09, d * 0.74); roof.rotation.y = Math.PI / 4;
-    roof.position.y = h + (hotel ? 0.05 : 0.045); roof.castShadow = true;
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(bg, mat), roof = new THREE.Mesh(rg, mat);
+    body.position.y = bh / 2; roof.position.y = bh;
+    body.castShadow = roof.castShadow = true;
     g.add(body, roof);
     return g;
+  }
+  /** Bendera kecil warna pemilik yang ditancapkan saat properti dibeli. */
+  function makeFlag(o) {
+    if (!shared.poleGeo) {
+      shared.poleGeo = new THREE.CylinderGeometry(0.014, 0.014, 0.56, 8);
+      shared.poleMat = new THREE.MeshStandardMaterial({ color: 0xdedede, metalness: 0.6, roughness: 0.3 });
+      shared.knobGeo = new THREE.SphereGeometry(0.025, 12, 8);
+      shared.knobMat = new THREE.MeshStandardMaterial({ color: lin(0xffc83d), metalness: 0.7, roughness: 0.25 });
+      shared.clothGeo = new THREE.PlaneGeometry(0.27, 0.17); shared.clothGeo.translate(0.135, 0, 0);
+      shared.clothMats = PCOL.map(c => new THREE.MeshStandardMaterial({ color: lin(c), emissive: lin(c), emissiveIntensity: 0.2, side: THREE.DoubleSide, roughness: 0.6 }));
+    }
+    const g = new THREE.Group();
+    const pole = new THREE.Mesh(shared.poleGeo, shared.poleMat); pole.position.y = 0.28;
+    const knob = new THREE.Mesh(shared.knobGeo, shared.knobMat); knob.position.y = 0.57;
+    const cloth = new THREE.Mesh(shared.clothGeo, shared.clothMats[o]); cloth.position.y = 0.46;
+    pole.castShadow = cloth.castShadow = true;
+    g.add(pole, knob, cloth);
+    g.userData = { o, cloth, ph: Math.random() * 6 };
+    return g;
+  }
+  /** Animasi "muncul" (membal) untuk bangunan/bendera baru. */
+  function pop(obj, delay) {
+    obj.scale.setScalar(0.001);
+    pops.push({ obj, t0: performance.now() + (delay || 0) });
   }
   function makeMonas() {
     const g = new THREE.Group();
     const white = new THREE.MeshStandardMaterial({ color: 0xf2efe6, roughness: 0.6 });
-    const gold = new THREE.MeshStandardMaterial({ color: 0xffc83d, emissive: 0x7a4a00, emissiveIntensity: 0.6, metalness: 0.7, roughness: 0.25 });
+    const gold = new THREE.MeshStandardMaterial({ color: lin(0xffc83d), emissive: lin(0x7a4a00), emissiveIntensity: 0.6, metalness: 0.7, roughness: 0.25 });
     const base = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.08, 0.95), white); base.position.y = 0.04;
     const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.26, 0.2, 4, 1), white); cup.position.y = 0.18; cup.rotation.y = Math.PI / 4;
     const obel = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.1, 1.2, 4, 1), white); obel.position.y = 0.88; obel.rotation.y = Math.PI / 4;
@@ -308,7 +345,7 @@ window.Scene3D = (() => {
 
     // papan
     const N = Math.min(renderer.capabilities.maxTextureSize, window.innerWidth < 800 ? 2048 : 4096);
-    const side = new THREE.MeshStandardMaterial({ color: 0x1f2a22, roughness: 0.6 });
+    const side = new THREE.MeshStandardMaterial({ color: lin(0x1f2a22), roughness: 0.6 });
     const body = new THREE.Mesh(new THREE.BoxGeometry(S + 0.2, 0.3, S + 0.2), side);
     body.position.y = -0.15; body.receiveShadow = true; body.castShadow = true;
     scene.add(body);
@@ -327,17 +364,17 @@ window.Scene3D = (() => {
     });
     const monas = makeMonas(); monas.position.set(3.3, 0, -3.3); scene.add(monas);
 
-    shared.houseMat = new THREE.MeshStandardMaterial({ color: 0x1fa24a, roughness: 0.45 });
-    shared.hotelMat = new THREE.MeshStandardMaterial({ color: 0xd62828, roughness: 0.45 });
+    shared.houseMat = new THREE.MeshStandardMaterial({ color: lin(0x15a043), roughness: 0.3, metalness: 0.05 });
+    shared.hotelMat = new THREE.MeshStandardMaterial({ color: lin(0xd81e1e), roughness: 0.3, metalness: 0.05 });
     shared.mortMat = new THREE.MeshBasicMaterial({ map: mortTex(), transparent: true, depthWrite: false });
     shared.tabGeo = new THREE.BoxGeometry(W * 0.86, 0.06, 0.2);
-    shared.tabMats = PCOL.map(c => new THREE.MeshBasicMaterial({ color: c, toneMapped: false }));
+    shared.tabMats = PCOL.map(c => new THREE.MeshBasicMaterial({ color: lin(c), toneMapped: false }));
 
-    hlFocus = tilePlane(1, new THREE.MeshBasicMaterial({ color: 0xffd34a, transparent: true, opacity: 0.35, depthWrite: false }), 0.012);
+    hlFocus = tilePlane(1, new THREE.MeshBasicMaterial({ color: lin(0xffd34a), transparent: true, opacity: 0.35, depthWrite: false }), 0.012);
     hlHover = tilePlane(1, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18, depthWrite: false }), 0.011);
     hlFocus.visible = hlHover.visible = false;
     scene.add(hlFocus, hlHover);
-    turnRing = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.27, 32), new THREE.MeshBasicMaterial({ color: 0xffd34a, transparent: true, opacity: 0.9, depthWrite: false }));
+    turnRing = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.27, 32), new THREE.MeshBasicMaterial({ color: lin(0xffd34a), transparent: true, opacity: 0.9, depthWrite: false }));
     turnRing.rotation.x = -Math.PI / 2; turnRing.visible = false;
     scene.add(turnRing);
 
@@ -424,6 +461,7 @@ window.Scene3D = (() => {
 
   function update(v) {
     view = v;
+    const initial = first;
     for (let i = 0; i < 6; i++) {
       const p = v.players[i];
       if (p && !p.out) ensureToken(i); else removeToken(i);
@@ -437,7 +475,7 @@ window.Scene3D = (() => {
       if (v.mid !== lastMid) { lastMid = v.mid; (v.mv || []).forEach(m => queue.push(Object.assign({}, m))); }
       if (!busy()) settle(false);
     }
-    syncBoard(v);
+    syncBoard(v, initial);
     const w = v.phase === 'play' ? E.whoActs(v) : -1;
     tagIdx = v.phase === 'play' ? v.turn : -1;
     focusIdx = v.phase !== 'play' ? -1 : v.step === 'auction' && v.auc ? v.auc.t : v.step === 'buy' ? v.players[v.turn].pos : -1;
@@ -453,7 +491,7 @@ window.Scene3D = (() => {
       if (snap) tk.mesh.position.copy(tk.target);
     });
   }
-  function syncBoard(v) {
+  function syncBoard(v, initial) {
     for (let t = 0; t < 40; t++) {
       if (!E.isOwnable(t)) continue;
       const o = v.own[t], ti = tileInfo(t);
@@ -470,9 +508,18 @@ window.Scene3D = (() => {
           scene.add(m); ownTabs[t] = m;
         }
       }
-      // rumah / hotel
-      const h = o >= 0 ? v.hs[t] : 0, hg = houseGroups[t];
-      if (!hg || hg.userData.h !== h) {
+      // bendera pemilik
+      const fl = flags[t];
+      if (o < 0) { if (fl) { scene.remove(fl); delete flags[t]; } } else if (!fl || fl.userData.o !== o) {
+        if (fl) scene.remove(fl);
+        const f = makeFlag(o), dv = -0.6, du = 0.4;
+        f.position.set(ti.x + ti.inx * dv + ti.ax * du, 0, ti.z + ti.inz * dv + ti.az * du);
+        scene.add(f); flags[t] = f;
+        if (!initial) pop(f, 250);
+      }
+      // rumah (hijau, 1–4) / hotel (merah)
+      const h = o >= 0 ? v.hs[t] : 0, hg = houseGroups[t], prev = hg ? hg.userData.h : 0;
+      if (!hg || prev !== h) {
         if (hg) scene.remove(hg);
         delete houseGroups[t];
         if (h) {
@@ -480,10 +527,11 @@ window.Scene3D = (() => {
           const d = C / 2 - 0.17;
           const n = h === 5 ? 1 : h;
           for (let k = 0; k < n; k++) {
-            const hm = makeHouse(h === 5), du = h === 5 ? 0 : (k - (n - 1) / 2) * 0.22;
+            const hm = makeHouse(h === 5), du = h === 5 ? 0 : (k - (n - 1) / 2) * 0.235;
             hm.position.set(ti.x + ti.inx * d + ti.ax * du, 0, ti.z + ti.inz * d + ti.az * du);
             hm.rotation.y = -ti.side * Math.PI / 2;
             g.add(hm);
+            if (!initial && h > prev && (h === 5 || k >= prev)) pop(hm, (k - (h === 5 ? 0 : prev)) * 120);
           }
           scene.add(g); houseGroups[t] = g;
         }
@@ -559,6 +607,13 @@ window.Scene3D = (() => {
       if (cur) runSeg(t);
     }
     tokens.forEach(tk => { if (tk && !tk.moving) tk.mesh.position.lerp(tk.target, 0.2); });
+    for (let k = pops.length - 1; k >= 0; k--) {
+      const p = pops[k], e = Math.max(0, Math.min(1, (t - p.t0) / 480));
+      const c = 2.2, s = e === 0 ? 0.001 : 1 + (c + 1) * Math.pow(e - 1, 3) + c * Math.pow(e - 1, 2); // easeOutBack
+      p.obj.scale.setScalar(Math.max(0.001, s));
+      if (e >= 1) { p.obj.scale.setScalar(1); pops.splice(k, 1); }
+    }
+    Object.values(flags).forEach(f => { f.userData.cloth.rotation.y = Math.sin(t / 420 + f.userData.ph) * 0.35; });
     const b = busy();
     if (wasBusy && !b) { settle(false); if (opts.onIdle) opts.onIdle(); }
     wasBusy = b;
@@ -611,6 +666,8 @@ window.Scene3D = (() => {
     Object.keys(ownTabs).forEach(t => { scene.remove(ownTabs[t]); delete ownTabs[t]; });
     Object.keys(houseGroups).forEach(t => { scene.remove(houseGroups[t]); delete houseGroups[t]; });
     Object.keys(mortPlanes).forEach(t => { scene.remove(mortPlanes[t]); delete mortPlanes[t]; });
+    Object.keys(flags).forEach(t => { scene.remove(flags[t]); delete flags[t]; });
+    pops.length = 0;
     queue.length = 0; cur = null; diceAnim = null; first = true; view = null; tagIdx = -1; focusIdx = -1; uiFocus = -1;
     if (tagEl) tagEl.hidden = true;
   }

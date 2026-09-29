@@ -6,7 +6,7 @@ Kota-kotanya dari Jayapura & Ambon (termurah) sampai Denpasar & Jakarta (termaha
 ## Menjalankan
 
 ```bash
-cd monopoly
+cd monopoly-ai
 npx serve .        # atau: python -m http.server
 ```
 
@@ -28,6 +28,12 @@ node tests/engine.test.js
   - Pemain yang terputus dimainkan otomatis dan bisa masuk lagi lewat link yang sama. Menekan **Keluar** saat game berjalan = bangkrut.
   - **Host pindah otomatis**: kalau host keluar atau terputus lebih dari ~6 detik, pemain lain jadi host dan game lanjut dari state terakhir.
   - Chat di panel 📜.
+- **Dompet (kiri bawah)**: uangmu ditampilkan sebagai tumpukan uang kertas per pecahan (Rp 5jt, 1jt, 500rb, 200rb, 100rb, 50rb, 10rb)
+  dengan animasi +/− saat uang berubah, dan semua properti milikmu tampil sebagai kartu Hak Milik yang dikelompokkan per warna
+  (bingkai emas = warna lengkap, stempel DIGADAI = sedang digadaikan). Klik kartu untuk bangun / jual / gadai / tebus.
+  Di layar kecil dompet dibuka lewat tombol 💼.
+- **Di papan**: properti yang dibeli ditandai bendera + strip warna pemilik. Setelah satu warna lengkap, bangunan muncul sebagai
+  rumah hijau (1–4) lalu berganti jadi hotel merah, dengan animasi muncul.
 - Kontrol: klik petak untuk melihat harga & sewa, drag untuk memutar kamera, scroll/pinch untuk zoom, 🎥 untuk reset kamera.
   Keyboard: **Spasi** = lempar dadu / akhiri giliran, **B** = beli, **A** = aset, **Esc** = tutup jendela.
 

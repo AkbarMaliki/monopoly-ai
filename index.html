@@ -16,6 +16,7 @@
       <button id="infoRoom" class="chipbtn" hidden title="Salin link undangan"></button>
     </div>
     <div class="tbtns">
+      <button id="btnWallet" title="Dompet & aset" hidden>💼</button>
       <button id="btnCam" title="Reset kamera">🎥</button>
       <button id="btnLog" title="Log & chat">📜</button>
       <button id="btnSound" title="Suara">🔊</button>
@@ -26,6 +27,12 @@
   <div id="status" hidden></div>
   <div id="players" hidden></div>
   <div id="actions" hidden></div>
+  <div id="wallet" hidden>
+    <div class="wHead"><span>💰 Uang <b id="wCash">Rp 0</b></span><span id="wDelta"></span><button id="wToggle" title="Ciutkan / tutup">▾</button></div>
+    <div id="wBills"></div>
+    <div class="wSub">🏠 Aset kamu <span id="wCount"></span> <small>· klik kartu untuk bangun / gadai</small></div>
+    <div id="wDeeds"></div>
+  </div>
   <div id="cardPop" hidden></div>
 
   <div id="modal" hidden>

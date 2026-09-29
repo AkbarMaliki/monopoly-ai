@@ -13,6 +13,17 @@
   const PCOL = Scene3D.PCOL;
   const MANAGE = ['build', 'sell', 'mort', 'unmort'];
   const DICE = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+  // pecahan uang kertas (satuan engine = Rp 10rb): [nilai, label, warna]
+  const BILLS = [[500, '5JT', '#c9a227'], [100, '1JT', '#d64545'], [50, '500RB', '#2f6fb5'], [20, '200RB', '#3f9e6a'], [10, '100RB', '#8e5bb5'], [5, '50RB', '#a0703f'], [1, '10RB', '#8a8f98']];
+  const BILL_IDEAL = { 1: 5, 5: 5, 10: 5, 20: 6, 50: 2, 100: 2, 500: 2 }; // susunan modal awal Monopoli klasik
+  /** Pecah uang jadi lembaran: isi pecahan kecil seperti modal awal Monopoli, sisanya pecahan terbesar. */
+  function billsOf(cash) {
+    let rem = Math.max(0, Math.floor(cash || 0));
+    const c = {};
+    BILLS.slice().reverse().forEach(([d]) => { const n = Math.min(BILL_IDEAL[d], Math.floor(rem / d)); c[d] = n; rem -= n * d; });
+    BILLS.forEach(([d]) => { const n = Math.floor(rem / d); c[d] += n; rem -= n * d; });
+    return c;
+  }
 
   let myId = store.get('mn_uid', '');
   if (!myId) { myId = 'u' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); store.set('mn_uid', myId); }
@@ -22,6 +33,7 @@
   let isHost = false, myIdx = -1, tickTimer = null, hk = null;
   let pendingSeq = -1, pendingAt = 0, lastView = null, localCfg = null, watchBots = false, overShown = false, bustShown = false;
   let modal = null, shownCard = 0, pendingCard = null, cardTimer = 0, lastLog = -1;
+  let wallet = { cash: null, owned: null, open: false };
 
   const playerName = () => (store.get('mn_name', '') || 'Pemain').slice(0, 16);
   const Net = {
@@ -415,7 +427,7 @@
       try { history.replaceState(null, '', location.pathname); } catch (e) { /* file:// */ }
     }
     mode = null; g = null; isHost = false; myIdx = -1; lastView = null; pendingSeq = -1; modal = null; hk = null;
-    pendingCard = null; lastLog = -1;
+    pendingCard = null; lastLog = -1; wallet = { cash: null, owned: null, open: false };
     $('cardPop').hidden = true; $('modal').hidden = true;
     Scene3D.reset();
     if (!silent) exitGameUI();
@@ -438,7 +450,7 @@
     Scene3D.resetCam();
   }
   function exitGameUI() {
-    ['topbar', 'actions', 'status', 'players', 'side', 'lobbyPanel', 'modal', 'cardPop'].forEach(id => { $(id).hidden = true; });
+    ['topbar', 'actions', 'status', 'players', 'wallet', 'side', 'lobbyPanel', 'modal', 'cardPop'].forEach(id => { $(id).hidden = true; });
     showOverlay('menuCard');
     if (activeTab === 'online') refreshRooms();
   }
@@ -453,6 +465,7 @@
     if (pendingSeq >= 0 && (pendingSeq !== v.seq || Date.now() - pendingAt > 3500)) pendingSeq = -1;
     Scene3D.update(v);
     renderPlayers(v);
+    renderWallet(v);
     renderStatus(v);
     renderActions(v);
     renderLog(v);
@@ -494,6 +507,62 @@
     }).join('');
     if (el.dataset.h !== html) { el.dataset.h = html; el.innerHTML = html; }
   }
+  // ---------- dompet: tumpukan uang kertas + kartu hak milik ----------
+  function renderWallet(v) {
+    const el = $('wallet');
+    const me = myIdx >= 0 ? v.players[myIdx] : null;
+    const show = v.phase === 'play' && me && !me.out;
+    el.hidden = !show;
+    $('btnWallet').hidden = !show;
+    if (!show) { wallet.cash = null; wallet.owned = null; return; }
+    el.classList.toggle('open', wallet.open);
+    el.classList.toggle('min', !!store.get('mn_wmin', false));
+
+    // uang + animasi selisih
+    $('wCash').textContent = money(me.cash);
+    if (wallet.cash != null && wallet.cash !== me.cash) {
+      const d = me.cash - wallet.cash, dl = $('wDelta');
+      dl.textContent = (d > 0 ? '+' : '−') + money(Math.abs(d));
+      dl.className = d > 0 ? 'up' : 'down';
+      void dl.offsetWidth; dl.classList.add('show');
+    }
+    wallet.cash = me.cash;
+    const bc = billsOf(me.cash);
+    const bh = BILLS.map(([d, lb, col]) => {
+      const n = bc[d], layers = Math.min(n, 9);
+      let ls = '';
+      for (let k = 0; k < layers; k++) ls += `<i class="bill" style="--i:${k};--r:${((k * 37) % 7) - 3}deg">${k === layers - 1 ? `<em>${lb}</em>` : ''}</i>`;
+      return `<div class="bstack${n ? '' : ' zero'}" style="--c:${col}" title="${money(d)} × ${n} lembar">
+        <div class="blayers" style="--h:${layers}">${ls || '<i class="bill ghost"></i>'}</div><b>×${n}</b></div>`;
+    }).join('');
+    if ($('wBills').dataset.h !== bh) { $('wBills').dataset.h = bh; $('wBills').innerHTML = bh; }
+
+    // kartu hak milik, dikelompokkan per warna / stasiun / utilitas
+    const owned = [];
+    for (let t = 0; t < 40; t++) if (v.own[t] === myIdx) owned.push(t);
+    const fresh = wallet.owned ? owned.filter(t => !wallet.owned.includes(t)) : [];
+    wallet.owned = owned;
+    $('wCount').textContent = owned.length ? `(${owned.length})` : '';
+    const groups = [];
+    E.GROUPS.forEach((G, k) => { const ts = owned.filter(t => TL[t].t === 'prop' && TL[t].g === k); if (ts.length) groups.push({ ts, col: G.c, full: E.hasMonopoly(v, myIdx, k) }); });
+    const rs = owned.filter(t => TL[t].t === 'rail'), us = owned.filter(t => TL[t].t === 'util');
+    if (rs.length) groups.push({ ts: rs, col: '#2b2f38', full: rs.length === 4 });
+    if (us.length) groups.push({ ts: us, col: '#2f6f8f', full: us.length === 2 });
+    const deed = t => {
+      const T = TL[t], col = T.t === 'prop' ? E.GROUPS[T.g].c : T.t === 'rail' ? '#2b2f38' : '#2f6f8f';
+      const icon = T.t === 'rail' ? '🚆 ' : T.t === 'util' ? (T.n === 'PLN' ? '⚡ ' : '🚰 ') : '';
+      const r = T.t === 'util' ? (E.UTILS.every(u => v.own[u] === myIdx) ? '10× dadu' : '4× dadu') : money(E.rent(v, t, 7));
+      const hs = v.hs[t] === 5 ? '<span class="hotel"></span>' : '<span class="house"></span>'.repeat(v.hs[t]);
+      return `<div class="deed${v.mg[t] ? ' mg' : ''}${fresh.includes(t) ? ' new' : ''}" data-tile="${t}" style="--c:${col}" title="${esc(T.n)} — klik untuk kelola">
+        <div class="dh"><small>HAK MILIK</small><b>${icon}${esc(T.n.replace('Stasiun ', 'St. '))}</b></div>
+        <div class="db"><small>Sewa</small><b>${v.mg[t] ? '—' : r}</b><div class="dhs">${hs}</div></div>
+        ${v.mg[t] ? '<div class="stamp">DIGADAI</div>' : ''}</div>`;
+    };
+    const dh = groups.length ? groups.map(G => `<div class="dgrp${G.full ? ' full' : ''}">${G.ts.map(deed).join('')}</div>`).join('')
+      : '<div class="muted small">Belum punya properti. Beli kota saat berhenti di petaknya!</div>';
+    if ($('wDeeds').dataset.h !== dh) { $('wDeeds').dataset.h = dh; $('wDeeds').innerHTML = dh; }
+  }
+
   function renderStatus(v) {
     const el = $('status');
     el.hidden = v.phase !== 'play';
@@ -923,6 +992,12 @@
     $('players').addEventListener('click', e => { const r = e.target.closest('[data-p]'); if (r) openModal('player', +r.dataset.p); });
     $('status').addEventListener('click', e => { const tc = e.target.closest('[data-tile]'); if (tc) openModal('tile', +tc.dataset.tile); });
     $('cardPop').onclick = () => { $('cardPop').hidden = true; };
+    $('wDeeds').addEventListener('click', e => { const d = e.target.closest('[data-tile]'); if (d) openModal('tile', +d.dataset.tile); });
+    $('wToggle').onclick = () => {
+      if (window.innerWidth <= 1000) wallet.open = false; else store.set('mn_wmin', !store.get('mn_wmin', false));
+      render();
+    };
+    $('btnWallet').onclick = () => { wallet.open = !wallet.open; render(); };
 
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || !mode) return;
@@ -979,5 +1054,5 @@
   showOverlay('menuCard');
   const qRoom = new URLSearchParams(location.search).get('room');
   if (qRoom) { setTab('online'); $('joinCode').value = qRoom.toUpperCase(); joinRoom(qRoom); }
-  window.__mono = { get g() { return g; }, get view() { return currentView(); }, sendAction, E };
+  window.__mono = { get g() { return g; }, get view() { return currentView(); }, sendAction, render, E };
 })();
