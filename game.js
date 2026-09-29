@@ -1,0 +1,983 @@
+/* Monopoli Indonesia — kontroler: mode lawan bot (lokal), online (Firebase), HUD, modal, suara. */
+(() => {
+  'use strict';
+  const E = window.MonoEngine, TL = E.TILES, money = E.money;
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* abaikan */ } },
+  };
+  const BOT_NAMES = ['Pak Budi', 'Bu Sri', 'Mas Joko', 'Mbak Rina', 'Bang Ucok', 'Kang Asep', 'Daeng Rudi', 'Cak Nur', 'Ning Ayu', 'Uda Rahmat', 'Koh Ahong', 'Bli Made', 'Nona Maria', 'Teh Euis'];
+  const LEVEL_NAME = ['', 'Mudah', 'Sedang', 'Sulit'];
+  const PCOL = Scene3D.PCOL;
+  const MANAGE = ['build', 'sell', 'mort', 'unmort'];
+  const DICE = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+
+  let myId = store.get('mn_uid', '');
+  if (!myId) { myId = 'u' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); store.set('mn_uid', myId); }
+
+  let mode = null;          // 'local' | 'online'
+  let g = null;             // state otoritatif (lokal / host)
+  let isHost = false, myIdx = -1, tickTimer = null, hk = null;
+  let pendingSeq = -1, pendingAt = 0, lastView = null, localCfg = null, watchBots = false, overShown = false, bustShown = false;
+  let modal = null, shownCard = 0, pendingCard = null, cardTimer = 0, lastLog = -1;
+
+  const playerName = () => (store.get('mn_name', '') || 'Pemain').slice(0, 16);
+  const Net = {
+    db: null, offset: 0, connected: false, code: null, ref: null, host: null, players: {},
+    pub: null, subs: [], hostSubs: [], hostGoneAt: 0, hostCheck: null, playersLoaded: false, enteredAt: 0,
+  };
+  const now = () => Date.now() + Net.offset;
+
+  // ---------- suara (WebAudio sintetis) ----------
+  const Snd = {
+    ctx: null, on: store.get('mn_snd', true),
+    init() { if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* tanpa suara */ } } if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); },
+    tone(freq, dur, type, vol, delay) {
+      if (!this.on || !this.ctx) return;
+      const c = this.ctx, t = c.currentTime + (delay || 0);
+      const o = c.createOscillator(), gn = c.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+      gn.gain.setValueAtTime(vol || 0.12, t); gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(gn).connect(c.destination); o.start(t); o.stop(t + dur + 0.02);
+    },
+    noise(dur, vol, delay, freq) {
+      if (!this.on || !this.ctx) return;
+      const c = this.ctx, t = c.currentTime + (delay || 0);
+      const len = Math.floor(c.sampleRate * dur), buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+      for (let k = 0; k < len; k++) d[k] = (Math.random() * 2 - 1) * (1 - k / len);
+      const src = c.createBufferSource(), f = c.createBiquadFilter(), gn = c.createGain();
+      f.type = 'bandpass'; f.frequency.value = freq || 3000; gn.gain.value = vol || 0.3;
+      src.buffer = buf; src.connect(f).connect(gn).connect(c.destination); src.start(t);
+    },
+    dice() { for (let k = 0; k < 7; k++) this.noise(0.05, 0.28, k * 0.09 + Math.random() * 0.04, 1800 + Math.random() * 1500); },
+    step() { this.tone(520, 0.05, 'triangle', 0.05); },
+    ding() { this.tone(880, 0.15, 'sine', 0.12); this.tone(1320, 0.25, 'sine', 0.1, 0.12); },
+    buy() { this.tone(1200, 0.08, 'square', 0.05); this.tone(1800, 0.25, 'triangle', 0.09, 0.08); this.noise(0.15, 0.15, 0.02, 5000); },
+    coin() { this.tone(1500, 0.07, 'triangle', 0.07); this.tone(2000, 0.15, 'triangle', 0.07, 0.07); },
+    pay() { this.tone(500, 0.1, 'triangle', 0.08); this.tone(380, 0.18, 'triangle', 0.07, 0.08); },
+    build() { this.noise(0.06, 0.3, 0, 900); this.noise(0.06, 0.3, 0.12, 900); this.tone(700, 0.1, 'square', 0.03, 0.2); },
+    card() { this.noise(0.12, 0.25, 0, 2400); this.tone(990, 0.2, 'sine', 0.06, 0.1); },
+    jail() { [300, 250, 200].forEach((f, k) => this.tone(f, 0.25, 'sawtooth', 0.05, k * 0.18)); },
+    bust() { [520, 440, 370, 300].forEach((f, k) => this.tone(f, 0.3, 'triangle', 0.1, k * 0.16)); },
+    win() { [523, 659, 784, 1047, 1319].forEach((f, k) => this.tone(f, 0.35, 'triangle', 0.1, k * 0.11)); },
+  };
+
+  // ---------- util UI ----------
+  let toastT = 0;
+  function toast(msg) {
+    const t = $('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+  function lobbyError(msg) { const e = $('lobbyError'); e.hidden = !msg; e.innerHTML = msg || ''; }
+  function permError(err) {
+    console.error(err);
+    const m = err && err.message ? err.message : err;
+    lobbyError(`<b>Tidak bisa mengakses database.</b><br>${esc(m)}<br>Pastikan Realtime Database aktif dan Rules mengizinkan baca/tulis node <code>monopoly</code> (lihat README).`);
+    if (mode === 'online') toast('Gagal akses database: ' + m);
+  }
+  function readCfg(online) {
+    return {
+      cash: +$('optCash').value, rounds: +$('optRounds').value, auction: +$('optAuction').value,
+      turn: online ? +$('optTurn').value : 0, speed: online ? 1 : +$('optSpeed').value,
+    };
+  }
+  function showOverlay(card) {
+    $('overlay').hidden = !card;
+    ['menuCard', 'overCard'].forEach(id => { $(id).hidden = id !== card; });
+  }
+  const pname = (v, i) => (i === myIdx ? 'Kamu' : v.players[i] ? v.players[i].name : '?');
+  const chip = (v, i) => `<b class="pc" style="--c:${PCOL[i]}">${esc(pname(v, i))}</b>`;
+  const tileChip = t => {
+    const T = TL[t];
+    const col = T.t === 'prop' ? E.GROUPS[T.g].c : T.t === 'rail' ? '#555' : '#8aa';
+    return `<span class="tc" data-tile="${t}"><i style="background:${col}"></i>${esc(T.n)}</span>`;
+  };
+
+  // ---------- loop host / lokal ----------
+  function authoritative() { return !!g && (mode === 'local' || isHost); }
+  function resetHk() { hk = { rid: g ? g.rid : 0, mid: g ? g.mid : 0, animUntil: 0, seq: -1, start: 0, delay: 0 }; }
+
+  function hostTick() {
+    if (!authoritative() || g.phase !== 'play') return;
+    const t = now();
+    if (!hk) resetHk();
+    if (g.rid !== hk.rid || g.mid !== hk.mid) {
+      hk.animUntil = t + E.animTime(g.mid !== hk.mid ? g.mv : [], g.rid !== hk.rid) + 150;
+      hk.rid = g.rid; hk.mid = g.mid;
+    }
+    const w = E.whoActs(g);
+    if (w < 0) return;
+    const p = g.players[w];
+    if (g.seq !== hk.seq) {
+      hk.seq = g.seq; hk.start = Math.max(t, hk.animUntil);
+      const fast = watchBots || (g.cfg.speed || 1) > 1;
+      hk.delay = (g.step === 'auction' ? 450 + Math.random() * 500 : g.trade ? 1400 : 600 + Math.random() * 700) * (fast ? 0.35 : 1);
+      let dl = 0;
+      if (!p.bot && g.cfg.turn) dl = hk.start + (g.step === 'auction' ? Math.min(15, g.cfg.turn) : g.cfg.turn) * 1000;
+      if ((g.deadline || 0) !== dl) { g.deadline = dl; commit(); return; }
+    }
+    if (t < hk.animUntil) return;
+    if (p.bot) {
+      if (t - hk.start < hk.delay) return;
+      const d = E.botDecide(g, w);
+      if (!d || E.act(g, w, d.t, d.d)) forceAct(w);
+      commit();
+    } else if ((p.away || p.leave) && t - hk.start > 1500) { autoAct(w); commit(); }
+    else if (g.deadline && t >= g.deadline) {
+      if (w === myIdx && mode === 'online') toast('Waktu habis — aksi otomatis');
+      autoAct(w); commit();
+    }
+  }
+  function autoAct(w) {
+    const d = E.autoDecide(g, w);
+    if (!d || E.act(g, w, d.t, d.d)) forceAct(w);
+  }
+  function forceAct(w) {
+    for (const t of ['tradeno', 'pass', 'end', 'decline', 'pay', 'roll', 'bankrupt']) if (!E.act(g, w, t, {})) return;
+  }
+  function commit() {
+    g.v++;
+    if (mode === 'online' && isHost) publish();
+    render();
+  }
+  function startTicker() { if (!tickTimer) tickTimer = setInterval(hostTick, 120); }
+  function stopTicker() { clearInterval(tickTimer); tickTimer = null; }
+
+  function botSeats(n) { return { 1: [3], 2: [2, 4], 3: [1, 3, 5], 4: [1, 2, 3, 4], 5: [1, 2, 3, 4, 5] }[n]; }
+  function pickBotNames(n) { return BOT_NAMES.slice().sort(() => Math.random() - 0.5).slice(0, n); }
+
+  // ---------- mode lokal ----------
+  function startLocal(cfg, nBots, level) {
+    leaveCurrent(true);
+    mode = 'local'; isHost = false; watchBots = false; bustShown = false; overShown = false;
+    localCfg = { cfg, nBots, level };
+    g = E.createGame(cfg);
+    E.addPlayer(g, 0, { id: myId, name: playerName() });
+    const names = pickBotNames(nBots);
+    botSeats(nBots).forEach((seat, k) => E.addPlayer(g, seat, { id: 'bot' + k, name: names[k], bot: level || 1 + Math.floor(Math.random() * 3) }));
+    E.startGame(g);
+    resetHk();
+    enterGameUI();
+    commit();
+    startTicker();
+  }
+
+  // ---------- online: Firebase ----------
+  const R = p => Net.db.ref('monopoly/' + p);
+  const SV = () => firebase.database.ServerValue.TIMESTAMP;
+
+  function netInit() {
+    if (Net.db) return true;
+    if (!window.firebase || !window.MONO_FIREBASE_CONFIG) { permError('Firebase SDK gagal dimuat (cek koneksi internet).'); return false; }
+    try {
+      const app = firebase.apps.find(a => a.name === 'monopoly') || firebase.initializeApp(window.MONO_FIREBASE_CONFIG, 'monopoly');
+      Net.db = app.database();
+    } catch (e) { permError(e); return false; }
+    Net.db.ref('.info/serverTimeOffset').on('value', s => { Net.offset = s.val() || 0; });
+    Net.db.ref('.info/connected').on('value', s => {
+      Net.connected = !!s.val();
+      $('connDot').className = Net.connected ? 'on' : '';
+      $('connText').textContent = Net.connected ? 'Terhubung ke server' : 'Menghubungkan…';
+      if (Net.connected && Net.ref) armPresence();
+    });
+    return true;
+  }
+  function armPresence() {
+    const me = Net.ref.child('players/' + myId);
+    me.child('conn').onDisconnect().set(false);
+    me.update({ name: playerName(), conn: true, t: SV() }).catch(permError);
+  }
+  function refreshRooms() {
+    if (!netInit()) return;
+    const el = $('roomList');
+    el.innerHTML = '<div class="muted">Memuat…</div>';
+    const cutoff = now() - 4 * 3600e3;
+    R('rooms').orderByChild('created').startAt(cutoff).limitToLast(20).once('value').then(s => {
+      const rows = [];
+      s.forEach(c => { const r = c.val(); if (r && r.host && r.status !== 'ended') rows.push([c.key, r]); });
+      rows.reverse();
+      el.innerHTML = rows.length ? rows.map(([k, r]) => {
+        const c = r.cfg || {};
+        return `<button class="roomRow" data-code="${esc(k)}"><b>${esc(k)}</b><span>${esc(r.hn || '?')}<br><small>Modal ${money(c.cash)}${c.rounds ? ` · ${c.rounds} putaran` : ''}</small></span>
+          <small>${r.n || 0} online<br>${r.status === 'lobby' ? 'Menunggu' : 'Bermain'}</small></button>`;
+      }).join('') : '<div class="muted">Belum ada room. Buat room baru!</div>';
+    }).catch(permError);
+    R('rooms').orderByChild('created').endAt(cutoff).limitToFirst(20).once('value')
+      .then(s => s.forEach(c => { c.ref.remove(); })).catch(() => {});
+  }
+  function genCode() {
+    const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let s = ''; for (let k = 0; k < 5; k++) s += A[Math.floor(Math.random() * A.length)];
+    return s;
+  }
+  async function createRoom() {
+    if (!netInit()) return;
+    lobbyError('');
+    const cfg = readCfg(true);
+    for (let k = 0; k < 6; k++) {
+      const code = genCode();
+      let res;
+      try { res = await R('rooms/' + code).transaction(cur => (cur ? undefined : { created: now(), status: 'lobby', host: myId, hn: playerName(), n: 1, cfg })); } catch (e) { permError(e); return; }
+      if (!res.committed) continue;
+      leaveCurrent(true);
+      g = E.createGame(cfg);
+      E.addPlayer(g, 0, { id: myId, name: playerName() });
+      enterRoom(code);
+      return;
+    }
+    lobbyError('Gagal membuat room, coba lagi.');
+  }
+  async function joinRoom(code) {
+    code = String(code || '').toUpperCase().trim();
+    if (!/^[A-Z0-9]{5}$/.test(code)) { lobbyError('Kode room harus 5 karakter.'); return; }
+    if (!netInit()) return;
+    lobbyError('');
+    let s;
+    try { s = await R('rooms/' + code + '/host').once('value'); } catch (e) { permError(e); return; }
+    if (!s.exists()) { lobbyError(`Room <b>${esc(code)}</b> tidak ditemukan.`); return; }
+    leaveCurrent(true);
+    g = null;
+    enterRoom(code);
+  }
+  function sub(list, ref, ev, fn) { ref.on(ev, fn, e => permError(e)); list.push(() => ref.off(ev, fn)); }
+  function enterRoom(code) {
+    mode = 'online'; isHost = false; overShown = false;
+    Object.assign(Net, { code, ref: R('rooms/' + code), pub: null, players: {}, host: null, hostGoneAt: 0, playersLoaded: false, enteredAt: Date.now() });
+    try { history.replaceState(null, '', location.pathname + '?room=' + code); } catch (e) { /* file:// */ }
+    armPresence();
+    sub(Net.subs, Net.ref.child('host'), 'value', s => onHost(s.val()));
+    sub(Net.subs, Net.ref.child('players'), 'value', s => { Net.players = s.val() || {}; Net.playersLoaded = true; onPlayers(); });
+    sub(Net.subs, Net.ref.child('pub'), 'value', s => {
+      const d = s.val();
+      if (!d) return;
+      try { Net.pub = JSON.parse(d); } catch (e) { return; }
+      if (!isHost) render();
+    });
+    $('chatList').innerHTML = '';
+    sub(Net.subs, Net.ref.child('chat').limitToLast(40), 'child_added', s => addChat(s.val()));
+    Net.hostCheck = setInterval(checkHost, 2000);
+    enterGameUI();
+    render();
+  }
+  function onHost(h) {
+    Net.host = h; Net.hostGoneAt = 0;
+    if (h === myId && !isHost) becomeHost();
+    else if (h !== myId && isHost) resignHost();
+  }
+  async function becomeHost() {
+    isHost = true;
+    if (!g) {
+      try { const f = await Net.ref.child('full').once('value'); if (f.val()) g = JSON.parse(f.val()); } catch (e) { console.error(e); }
+      if (!g) {
+        const c = await Net.ref.child('cfg').once('value').catch(() => null);
+        g = E.createGame((c && c.val()) || readCfg(true));
+      }
+      if (Net.pub) toast('Host terputus — kamu sekarang host room ini.');
+    }
+    if (!isHost || !Net.ref) return;
+    const ar = Net.ref.child('act');
+    const fn = s => { const a = s.val(); s.ref.remove(); handleAct(a); };
+    ar.on('child_added', fn);
+    Net.hostSubs.push(() => ar.off('child_added', fn));
+    Net.ref.update({ hn: playerName() }).catch(() => {});
+    resetHk();
+    syncPlayers(true);
+    commit();
+    startTicker();
+  }
+  function resignHost() {
+    isHost = false; g = null;
+    Net.hostSubs.forEach(f => f()); Net.hostSubs = [];
+    stopTicker();
+    render();
+  }
+  function handleAct(a) {
+    if (!a || !authoritative()) return;
+    const i = g.players.findIndex(p => p && p.id === a.u);
+    if (i < 0) return;
+    if (!MANAGE.includes(a.t) && a.q !== g.seq) return;
+    if (!E.act(g, i, a.t, a.d || {})) commit();
+  }
+  function publish() {
+    if (!Net.ref || !g) return;
+    Net.ref.update({
+      pub: JSON.stringify(E.publicState(g)),
+      full: JSON.stringify(g),
+      status: g.phase === 'lobby' ? 'lobby' : g.phase === 'over' ? 'over' : 'playing',
+      n: Object.values(Net.players).filter(p => p && p.conn).length || 1,
+    }).catch(permError);
+  }
+  function onPlayers() {
+    if (isHost) syncPlayers();
+    checkHost();
+    render();
+  }
+  function freeSeat(game) {
+    for (const i of [0, 3, 1, 4, 2, 5]) if (!game.players[i]) return i;
+    return -1;
+  }
+  /** Host: cocokkan kursi dengan daftar pemain di room. */
+  function syncPlayers(silent) {
+    if (!authoritative() || !Net.playersLoaded) return;
+    const ps = Net.players;
+    let ch = false;
+    g.players.forEach((s, i) => {
+      if (!s || s.bot) return;
+      if (s.id === myId) { if (s.away || s.leave) { s.away = false; s.leave = false; ch = true; } return; }
+      const p = ps[s.id];
+      if (!p || !p.name) {
+        if (g.phase === 'play' && !s.out) { s.leave = true; E.removePlayer(g, i); ch = true; }
+        else if (g.phase !== 'play') { g.players[i] = null; ch = true; }
+        return;
+      }
+      const away = !p.conn;
+      if (s.away !== away) { s.away = away; ch = true; }
+      if (g.phase === 'lobby' && p.name !== s.name) { s.name = String(p.name).slice(0, 16); ch = true; }
+    });
+    if (g.phase === 'lobby') {
+      Object.keys(ps).forEach(id => {
+        const p = ps[id];
+        if (!p || !p.conn || !p.name || g.players.some(s => s && s.id === id)) return;
+        const i = freeSeat(g);
+        if (i < 0) return; // penuh → penonton
+        E.addPlayer(g, i, { id, name: p.name });
+        ch = true;
+      });
+    }
+    if (ch && !silent) commit();
+  }
+  function checkHost() {
+    if (mode !== 'online' || isHost || !Net.host || !Net.connected) return;
+    const hp = Net.players[Net.host];
+    if (hp && hp.conn) { Net.hostGoneAt = 0; return; }
+    if (!Net.hostGoneAt) { Net.hostGoneAt = Date.now(); return; }
+    if (Date.now() - Net.hostGoneAt < 6000) return;
+    const cands = Object.keys(Net.players).filter(id => Net.players[id] && Net.players[id].conn).sort();
+    if (cands[0] !== myId) return;
+    const old = Net.host;
+    Net.hostGoneAt = Date.now();
+    Net.ref.child('host').transaction(cur => (cur === old ? myId : undefined)).catch(console.error);
+  }
+
+  function sendAction(t, d) {
+    const v = currentView();
+    if (!v || myIdx < 0) return;
+    if (authoritative()) {
+      const err = E.act(g, myIdx, t, d);
+      if (err) toast(err); else commit();
+      return;
+    }
+    const mg = MANAGE.includes(t);
+    if (!mg && pendingSeq === v.seq) return;
+    try { // validasi lokal pada salinan state agar pesan error langsung muncul
+      const c = JSON.parse(JSON.stringify(v));
+      c.decks = { chance: [0], chest: [0] }; c.tmem = {};
+      const err = E.act(c, myIdx, t, d);
+      if (err) { toast(err); return; }
+    } catch (e) { /* biarkan host yang memutuskan */ }
+    if (!mg) { pendingSeq = v.seq; pendingAt = Date.now(); }
+    Net.ref.child('act').push({ u: myId, q: v.seq, t, d: d || null }).catch(permError);
+    render();
+  }
+  function sendChat(m) {
+    m = String(m || '').trim().slice(0, 160);
+    if (!m || !Net.ref) return;
+    Net.ref.child('chat').push({ n: playerName(), m, t: SV() }).catch(permError);
+  }
+  function addChat(c) {
+    if (!c || !c.m) return;
+    const el = $('chatList'), d = document.createElement('div');
+    d.innerHTML = `<b>${esc(c.n)}:</b> ${esc(c.m)}`;
+    el.appendChild(d); el.scrollTop = el.scrollHeight;
+    if ($('side').hidden && Date.now() - Net.enteredAt > 3000) toast(`💬 ${c.n}: ${c.m}`);
+  }
+
+  function leaveCurrent(silent) {
+    stopTicker();
+    if (mode === 'online' && Net.ref) {
+      const ref = Net.ref;
+      if (isHost && g) {
+        const i = g.players.findIndex(p => p && p.id === myId);
+        if (i >= 0) { g.players[i].leave = true; E.removePlayer(g, i); }
+        g.v++; publish();
+        const others = Object.keys(Net.players).filter(id => id !== myId && Net.players[id] && Net.players[id].conn).sort();
+        if (others.length) ref.child('host').set(others[0]).catch(() => {});
+        else ref.update({ status: 'ended' }).catch(() => {});
+      }
+      Net.subs.forEach(f => f()); Net.hostSubs.forEach(f => f());
+      Net.subs = []; Net.hostSubs = [];
+      ref.child('players/' + myId + '/conn').onDisconnect().cancel().catch(() => {});
+      ref.child('players/' + myId).remove().catch(() => {});
+      clearInterval(Net.hostCheck);
+      Net.ref = null; Net.code = null; Net.pub = null; Net.host = null;
+      try { history.replaceState(null, '', location.pathname); } catch (e) { /* file:// */ }
+    }
+    mode = null; g = null; isHost = false; myIdx = -1; lastView = null; pendingSeq = -1; modal = null; hk = null;
+    pendingCard = null; lastLog = -1;
+    $('cardPop').hidden = true; $('modal').hidden = true;
+    Scene3D.reset();
+    if (!silent) exitGameUI();
+  }
+
+  // ---------- tampilan ----------
+  function currentView() {
+    if (authoritative()) return g;
+    if (mode !== 'online') return null;
+    return Net.pub;
+  }
+  function enterGameUI() {
+    showOverlay(null);
+    $('topbar').hidden = false;
+    $('chatBox').hidden = mode !== 'online';
+    $('infoRoom').hidden = mode !== 'online';
+    if (mode === 'online') $('infoRoom').textContent = '🔗 ' + Net.code;
+    $('logList').innerHTML = '';
+    $('side').hidden = window.innerWidth < 1280 || !store.get('mn_side', true);
+    Scene3D.resetCam();
+  }
+  function exitGameUI() {
+    ['topbar', 'actions', 'status', 'players', 'side', 'lobbyPanel', 'modal', 'cardPop'].forEach(id => { $(id).hidden = true; });
+    showOverlay('menuCard');
+    if (activeTab === 'online') refreshRooms();
+  }
+
+  function render() {
+    const v = currentView();
+    if (!v) {
+      if (mode === 'online') ['lobbyPanel', 'actions', 'status', 'players'].forEach(id => { $(id).hidden = true; });
+      return;
+    }
+    myIdx = v.players.findIndex(p => p && p.id === myId);
+    if (pendingSeq >= 0 && (pendingSeq !== v.seq || Date.now() - pendingAt > 3500)) pendingSeq = -1;
+    Scene3D.update(v);
+    renderPlayers(v);
+    renderStatus(v);
+    renderActions(v);
+    renderLog(v);
+    renderLobby(v);
+    renderModal(v);
+    checkCard(v);
+    playSounds(v, lastView);
+    renderOver(v);
+    lastView = snap(v);
+  }
+  function snap(v) {
+    return {
+      who: E.whoActs(v), own: v.own.filter(o => o >= 0).length, hs: v.hs.reduce((a, b) => a + b, 0),
+      jail: v.players.map(p => (p ? p.jail : 0)), out: v.players.filter(p => p && p.out).length,
+      cash: myIdx >= 0 ? v.players[myIdx].cash : 0, phase: v.phase, trade: v.trade ? v.trade.id : 0,
+    };
+  }
+
+  function renderPlayers(v) {
+    const el = $('players');
+    el.hidden = v.phase === 'lobby';
+    if (el.hidden) return;
+    const w = E.whoActs(v);
+    const html = v.players.map((p, i) => {
+      if (!p) return '';
+      const n = v.own.filter(o => o === i).length;
+      const tags = [
+        p.bot ? `<span title="Bot ${LEVEL_NAME[p.bot]}">🤖</span>` : '',
+        mode === 'online' && p.id === Net.host ? '<span title="Host">👑</span>' : '',
+        p.away && !p.out ? '<span title="Terputus">📴</span>' : '',
+        p.jail ? '<span title="Di penjara">🔒</span>' : '',
+        p.jc && p.jc.length ? `<span title="Kartu bebas penjara">🎫${p.jc.length > 1 ? p.jc.length : ''}</span>` : '',
+      ].join('');
+      const cls = ['pRow', i === v.turn && v.phase === 'play' ? 'turn' : '', i === w ? 'act' : '', p.out ? 'out' : '', i === myIdx ? 'me' : ''].join(' ');
+      return `<div class="${cls}" data-p="${i}"><i class="dot" style="background:${PCOL[i]}"></i>
+        <div class="pMain"><div class="pName">${esc(p.name)}${i === myIdx ? ' <small>(kamu)</small>' : ''} ${tags}</div>
+        <div class="pSub">${p.out ? 'Bangkrut' : `<b>${money(p.cash)}</b> · ${n} aset`}</div></div>
+        <div class="pt" data-tp="${i}"><i></i></div></div>`;
+    }).join('');
+    if (el.dataset.h !== html) { el.dataset.h = html; el.innerHTML = html; }
+  }
+  function renderStatus(v) {
+    const el = $('status');
+    el.hidden = v.phase !== 'play';
+    if (el.hidden) return;
+    const busy = Scene3D.busy();
+    let sub = '';
+    if (v.trade) sub = `🤝 ${chip(v, v.trade.from)} menawarkan tukar ke ${chip(v, v.trade.to)}`;
+    else if (v.step === 'auction' && v.auc) sub = `🔨 Lelang ${esc(TL[v.auc.t].n)} · giliran ${chip(v, v.auc.cur)}`;
+    else if (busy) sub = '…';
+    else if (v.step === 'buy') sub = `Memutuskan membeli ${esc(TL[v.players[v.turn].pos].n)}`;
+    else if (v.step === 'debt') sub = `Kekurangan uang: harus bayar ${money(v.debt.a)}`;
+    else if (v.step === 'roll') sub = v.players[v.turn].jail ? 'Di penjara' : v.again ? 'Dadu kembar, lempar lagi!' : 'Melempar dadu';
+    else if (v.step === 'end') sub = 'Selesai bergerak';
+    const html = `<div class="st1"><span class="dice">${DICE[v.dice[0]]}${DICE[v.dice[1]]}</span> Giliran ${chip(v, v.turn)}
+      <small>· Putaran ${v.round}${v.cfg.rounds ? '/' + v.cfg.rounds : ''}</small></div><div class="st2">${sub}</div>`;
+    if (el.dataset.h !== html) { el.dataset.h = html; el.innerHTML = html; }
+  }
+
+  function renderActions(v) {
+    const el = $('actions');
+    const html = actionsHTML(v);
+    el.hidden = !html;
+    if (el.dataset.h === html) return;
+    el.dataset.h = html; el.innerHTML = html;
+    const bi = $('bidIn');
+    if (bi) { bi.addEventListener('input', bidPreview); bidPreview(); }
+  }
+  function bidPreview() { const bi = $('bidIn'), pv = $('bidPv'); if (bi && pv) pv.textContent = money(+bi.value || 0); }
+  function btn(a, label, cls, dis, title) {
+    return `<button data-a="${a}" class="${cls || ''}"${dis ? ' disabled' : ''}${title ? ` title="${esc(title)}"` : ''}>${label}</button>`;
+  }
+  const TOOLS = '<div class="aTools">' + btn('assets', '🏠 Aset') + btn('trade', '🤝 Tukar') + '</div>';
+  function actionsHTML(v) {
+    if (v.phase !== 'play') return '';
+    const me = myIdx >= 0 ? v.players[myIdx] : null;
+    const wait = pendingSeq === v.seq;
+    const timer = '<div class="timer"><i id="timerBar"></i></div>';
+    const tr = v.trade;
+    if (tr) {
+      if (tr.to === myIdx) {
+        const side = (ps, c) => (ps.length ? ps.map(tileChip).join(' ') : '') + (c ? ` <span class="tc money">${money(c)}</span>` : '') || '<span class="muted">—</span>';
+        return `<div class="aHead">🤝 Tawaran tukar dari ${chip(v, tr.from)}</div>
+          <div class="trView"><div><small>Kamu dapat</small><div>${side(tr.gp, tr.gc)}</div></div><div><small>Kamu berikan</small><div>${side(tr.tp, tr.tc)}</div></div></div>
+          <div class="aBtns">${btn('tradeok', '✔ Terima', 'go', wait)}${btn('tradeno', '✕ Tolak', 'no', wait)}</div>${timer}`;
+      }
+      if (tr.from === myIdx) return `<div class="aHead">⏳ Menunggu jawaban ${chip(v, tr.to)}…</div><div class="aBtns">${btn('tradecancel', 'Batalkan tawaran', '', wait)}</div>`;
+      return '';
+    }
+    if (Scene3D.busy()) return '';
+    if (v.step === 'auction' && v.auc) {
+      const a = v.auc, T = TL[a.t], mine = a.cur === myIdx && me && !me.out;
+      const top = a.by >= 0 ? `${money(a.bid)} oleh ${chip(v, a.by)}` : 'belum ada';
+      let body = `<div class="aHead">🔨 Lelang ${tileChip(a.t)} <small>harga ${money(T.p)}</small></div>
+        <div class="aInfo">Tawaran tertinggi: <b>${top}</b></div>`;
+      if (mine) {
+        const min = a.bid + 10;
+        body += `<div class="bidRow"><input id="bidIn" type="number" min="${a.bid + 1}" max="${me.cash}" step="10" value="${Math.min(min, me.cash)}"><span id="bidPv"></span></div>
+          <div class="aBtns small">${[10, 50, 100].map(x => `<button data-a="bidplus" data-v="${x}">+${money(x)}</button>`).join('')}</div>
+          <div class="aBtns">${btn('bid', '🔨 Tawar', 'go', wait || me.cash <= a.bid)}${btn('pass', 'Lewati', 'no', wait)}</div>${timer}`;
+      } else body += `<div class="aInfo muted">Menunggu tawaran ${chip(v, a.cur)}…</div>`;
+      return body;
+    }
+    if (!me || me.out || v.turn !== myIdx) return '';
+    switch (v.step) {
+      case 'roll':
+        if (me.jail) {
+          return `<div class="aHead">🔒 Kamu di penjara <small>(percobaan ${me.jail}/3)</small></div>
+            <div class="aBtns">${btn('roll', '🎲 Coba kembar', 'go', wait)}${btn('jailpay', 'Bayar ' + money(E.JAIL_FINE), '', wait || me.cash < E.JAIL_FINE)}${me.jc.length ? btn('jailcard', '🎫 Pakai kartu', '', wait) : ''}</div>${TOOLS}${timer}`;
+        }
+        return `<div class="aBtns">${btn('roll', v.again ? '🎲 Lempar lagi <kbd>Spasi</kbd>' : '🎲 Lempar Dadu <kbd>Spasi</kbd>', 'go big', wait)}</div>${TOOLS}${timer}`;
+      case 'buy': {
+        const t = me.pos, T = TL[t];
+        const can = me.cash >= T.p;
+        return `<div class="aHead">${tileChip(t)} <small>dijual ${money(T.p)}</small></div>
+          <div class="aInfo">${rentLine(t)}</div>
+          <div class="aBtns">${btn('buy', `Beli ${money(T.p)} <kbd>B</kbd>`, 'go', wait || !can, can ? '' : 'Uang tidak cukup — gadaikan aset dulu')}${btn('decline', v.cfg.auction ? '🔨 Lelang' : 'Lewati', 'no', wait)}</div>
+          ${can ? '' : '<div class="aInfo warn">Uang kurang. Gadaikan aset lewat 🏠 Aset, atau lelang.</div>'}${TOOLS}${timer}`;
+      }
+      case 'debt': {
+        const d = v.debt, to = d.to >= 0 ? chip(v, d.to) : d.to === -2 ? 'semua pemain' : 'Bank';
+        return `<div class="aHead warn">💸 Harus bayar ${money(d.a)} ke ${to}</div>
+          <div class="aInfo">Uangmu ${money(me.cash)}. Jual rumah / gadaikan aset lewat 🏠 Aset, atau tawarkan tukar.</div>
+          <div class="aBtns">${btn('pay', 'Bayar ' + money(d.a), 'go', wait || me.cash < d.a)}${btn('bankrupt', '💥 Bangkrut', 'no', wait)}</div>${TOOLS}${timer}`;
+      }
+      case 'end':
+        return `<div class="aBtns">${btn('end', '✔ Akhiri Giliran <kbd>Spasi</kbd>', 'go big', wait)}</div>${TOOLS}${timer}`;
+    }
+    return '';
+  }
+  function rentLine(t) {
+    const T = TL[t];
+    if (T.t === 'prop') return `Sewa ${money(T.r[0])} · monopoli ${money(T.r[0] * 2)} · hotel ${money(T.r[5])}`;
+    if (T.t === 'rail') return `Sewa ${money(25)} / ${money(50)} / ${money(100)} / ${money(200)} (1–4 stasiun)`;
+    return 'Sewa 4× dadu (10× jika punya PLN & PDAM)';
+  }
+
+  function renderLog(v) {
+    if (v.lc === lastLog) return;
+    lastLog = v.lc;
+    $('logList').innerHTML = v.log.map(l => `<div class="${l.startsWith('—') ? 'h' : ''}">${esc(l)}</div>`).join('');
+    $('logList').scrollTop = 1e9;
+  }
+
+  function renderLobby(v) {
+    const show = mode === 'online' && v.phase === 'lobby';
+    $('lobbyPanel').hidden = !show;
+    if (!show) return;
+    $('lpCode').textContent = Net.code;
+    const host = authoritative();
+    $('lpHost').hidden = !host; $('lpWait').hidden = host;
+    const seated = v.players.filter(Boolean).length;
+    $('btnStart').disabled = seated < 2;
+    $('btnAddBot').disabled = seated >= 6;
+    const rows = v.players.map((s, i) => {
+      if (!s) return `<div class="lpSeat empty"><i class="dot" style="background:${PCOL[i]}"></i>Kursi kosong</div>`;
+      const tag = s.bot ? `🤖 Bot ${LEVEL_NAME[s.bot]}` : s.id === Net.host ? '👑 Host' : s.away ? 'offline' : '👤 Pemain';
+      const rm = host && s.bot ? `<button data-rm="${i}">✕</button>` : '';
+      return `<div class="lpSeat"><span><i class="dot" style="background:${PCOL[i]}"></i>${esc(s.name)}${s.id === myId ? ' (kamu)' : ''}</span><span><small>${tag}</small> ${rm}</span></div>`;
+    }).join('');
+    const spect = Object.keys(Net.players).filter(id => Net.players[id].conn && !v.players.some(s => s && s.id === id)).length;
+    const c = v.cfg;
+    const html = rows + (spect ? `<div class="muted center">${spect} penonton</div>` : '') +
+      `<div class="muted center small">Modal ${money(c.cash)} · ${c.rounds ? c.rounds + ' putaran' : 'tanpa batas putaran'} · lelang ${c.auction ? 'aktif' : 'mati'} · ${c.turn} dtk/giliran</div>`;
+    if ($('lpSeats').innerHTML !== html) $('lpSeats').innerHTML = html;
+  }
+
+  // ---------- modal ----------
+  function openModal(type, arg) {
+    modal = { type, arg };
+    const v = currentView();
+    $('modal').hidden = false;
+    if (type === 'trade') { buildTrade(v, arg); return; }
+    $('modalBody').dataset.h = '';
+    renderModal(v);
+  }
+  function closeModal() { modal = null; $('modal').hidden = true; Scene3D.highlight(-1); }
+  function renderModal(v) {
+    if (!modal || modal.type === 'trade' || !v) return;
+    let html = '';
+    if (modal.type === 'tile') html = tileHTML(v, modal.arg);
+    else if (modal.type === 'assets') html = assetsHTML(v, myIdx);
+    else if (modal.type === 'player') html = assetsHTML(v, modal.arg);
+    const b = $('modalBody');
+    if (b.dataset.h !== html) { b.dataset.h = html; b.innerHTML = html; }
+    Scene3D.highlight(modal.type === 'tile' ? modal.arg : -1);
+  }
+  function manageBtns(v, t, compact) {
+    if (v.phase !== 'play' || myIdx < 0 || v.own[t] !== myIdx || v.players[myIdx].out) return '';
+    const T = TL[t], out = [];
+    const b = (a, label, err) => `<button data-m="${a}" data-t="${t}"${err ? ` disabled title="${esc(err)}"` : ''}>${label}</button>`;
+    if (T.t === 'prop') {
+      const hc = E.houseCost(t);
+      out.push(b('build', v.hs[t] === 4 ? `🏨 +Hotel ${compact ? '' : money(hc)}` : `🏠 +Rumah ${compact ? '' : money(hc)}`, E.canBuild(v, myIdx, t)));
+      if (v.hs[t]) out.push(b('sell', `Jual ${compact ? '' : '+' + money(Math.floor(hc / 2))}`, E.canSell(v, myIdx, t)));
+    }
+    if (v.mg[t]) out.push(b('unmort', `Tebus ${money(E.unmortCost(t))}`, E.canUnmort(v, myIdx, t)));
+    else if (!v.hs[t]) out.push(b('mort', `Gadai +${money(E.mortValue(t))}`, E.canMort(v, myIdx, t)));
+    return `<div class="mBtns">${out.join('')}</div>`;
+  }
+  function housesTxt(h) { return h === 5 ? '🏨' : '🏠'.repeat(h); }
+  function tileHTML(v, t) {
+    const T = TL[t];
+    const head = T.t === 'prop' ? E.GROUPS[T.g].c : T.t === 'rail' ? '#3d4452' : T.t === 'util' ? '#2f6f8f' : T.t === 'chance' ? '#f07f13' : T.t === 'chest' ? '#2a7de1' : '#5b4b3a';
+    let body = '';
+    if (T.t === 'prop') {
+      const o = v.own[t], mono = o >= 0 && E.hasMonopoly(v, o, T.g);
+      const rows = [['Sewa', T.r[0]], ['Satu warna lengkap', T.r[0] * 2], ['1 rumah', T.r[1]], ['2 rumah', T.r[2]], ['3 rumah', T.r[3]], ['4 rumah', T.r[4]], ['Hotel', T.r[5]]];
+      const curIdx = o < 0 ? -1 : v.hs[t] ? v.hs[t] + 1 : mono ? 1 : 0;
+      body = `<table class="rent">${rows.map(([a, b], k) => `<tr class="${k === curIdx ? 'cur' : ''}"><td>${a}</td><td>${money(b)}</td></tr>`).join('')}</table>
+        <div class="kv"><span>Harga rumah/hotel</span><b>${money(E.houseCost(t))}</b></div>`;
+    } else if (T.t === 'rail') {
+      body = `<table class="rent">${[1, 2, 3, 4].map(k => `<tr><td>Punya ${k} stasiun</td><td>${money(25 * Math.pow(2, k - 1))}</td></tr>`).join('')}</table>`;
+    } else if (T.t === 'util') {
+      body = '<p>Sewa = <b>4×</b> angka dadu jika punya satu utilitas, <b>10×</b> jika punya PLN dan PDAM.</p>';
+    } else {
+      const d = {
+        go: `Setiap melewati atau berhenti di MULAI, terima ${money(E.GO_SALARY)}.`,
+        jail: `Hanya mampir kalau berhenti di sini. Kalau dipenjara: lempar kembar, bayar ${money(E.JAIL_FINE)}, atau pakai kartu. Setelah 3 kali gagal wajib bayar denda.`,
+        park: 'Istirahat sejenak. Tidak terjadi apa-apa.',
+        gojail: 'Langsung masuk penjara tanpa melewati MULAI.',
+        chance: 'Ambil kartu Kesempatan.', chest: 'Ambil kartu Dana Umum.',
+        tax: `Bayar ${money(T.a)} ke bank.`,
+      }[T.t];
+      body = `<p>${d}</p>`;
+    }
+    let own = '';
+    if (E.isOwnable(t)) {
+      const o = v.own[t];
+      own = `<div class="kv"><span>Harga</span><b>${money(T.p)}</b></div><div class="kv"><span>Nilai gadai</span><b>${money(E.mortValue(t))}</b></div>
+        <div class="kv"><span>Pemilik</span><b>${o >= 0 ? chip(v, o) : 'Bank (belum dimiliki)'}</b></div>
+        ${o >= 0 && v.hs[t] ? `<div class="kv"><span>Bangunan</span><b>${housesTxt(v.hs[t])}</b></div>` : ''}
+        ${o >= 0 && v.mg[t] ? '<div class="kv warn"><span>Status</span><b>Digadaikan</b></div>' : ''}
+        ${o >= 0 ? `<div class="kv"><span>Sewa sekarang</span><b>${T.t === 'util' ? (v.mg[t] ? money(0) : (E.UTILS.every(u => v.own[u] === o) ? '10' : '4') + '× dadu') : money(E.rent(v, t, 7))}</b></div>` : ''}`;
+    }
+    return `<div class="tHead" style="background:${head}"><small>${T.t === 'prop' ? esc(E.GROUPS[T.g].n) : ''}</small><h3>${esc(T.n)}</h3></div>
+      <div class="tBody">${body}${own}${manageBtns(v, t)}</div>`;
+  }
+  function assetsHTML(v, i) {
+    const p = v.players[i];
+    if (!p) return '<p>—</p>';
+    const list = [];
+    for (let t = 0; t < 40; t++) if (v.own[t] === i) list.push(t);
+    const groups = [];
+    E.GROUPS.forEach((G, k) => { const ts = list.filter(t => TL[t].t === 'prop' && TL[t].g === k); if (ts.length) groups.push([G.n, G.c, ts, E.hasMonopoly(v, i, k)]); });
+    const rs = list.filter(t => TL[t].t === 'rail'), us = list.filter(t => TL[t].t === 'util');
+    if (rs.length) groups.push(['Stasiun', '#3d4452', rs, false]);
+    if (us.length) groups.push(['Utilitas', '#2f6f8f', us, false]);
+    const mine = i === myIdx;
+    const rows = groups.map(([n, c, ts, mono]) => `<div class="aGroup"><div class="aGH" style="--c:${c}">${esc(n)}${mono ? ' <small>✔ lengkap</small>' : ''}</div>
+      ${ts.map(t => `<div class="aRow${v.mg[t] ? ' mg' : ''}"><span class="aName" data-tile="${t}">${esc(TL[t].n)} <small>${housesTxt(v.hs[t])}${v.mg[t] ? ' digadaikan' : ''}</small></span>${mine ? manageBtns(v, t, true) : ''}</div>`).join('')}</div>`).join('');
+    return `<div class="tHead" style="background:${PCOL[i]}"><small>${mine ? 'Aset kamu' : 'Aset pemain'}</small><h3>${esc(p.name)}</h3></div>
+      <div class="tBody"><div class="kv"><span>Uang</span><b>${money(p.cash)}</b></div><div class="kv"><span>Total kekayaan</span><b>${money(E.worth(v, i))}</b></div>
+      ${p.jc && p.jc.length ? `<div class="kv"><span>Kartu bebas penjara</span><b>${p.jc.length}</b></div>` : ''}
+      ${rows || '<p class="muted">Belum punya properti.</p>'}
+      ${mine ? `<p class="muted small">Bangun rumah harus merata dan memiliki semua kota satu warna. Stok bank: ${E.housesLeft(v)} rumah, ${E.hotelsLeft(v)} hotel.</p>` : ''}</div>`;
+  }
+  function buildTrade(v, to) {
+    const others = v.players.map((p, i) => i).filter(i => i !== myIdx && v.players[i] && !v.players[i].out);
+    if (!others.length) { closeModal(); return; }
+    if (!others.includes(to)) to = others[0];
+    const me = v.players[myIdx];
+    const list = (who, id) => {
+      const ts = [];
+      for (let t = 0; t < 40; t++) if (v.own[t] === who) ts.push(t);
+      if (!ts.length) return '<p class="muted small">Tidak ada properti.</p>';
+      return ts.map(t => {
+        const ok = E.tradable(v, who, t);
+        return `<label class="trItem${ok ? '' : ' dis'}"><input type="checkbox" data-${id}="${t}"${ok ? '' : ' disabled'}>${tileChip(t)}${v.mg[t] ? '<small>gadai</small>' : ''}${ok ? '' : '<small>ada bangunan</small>'}</label>`;
+      }).join('');
+    };
+    $('modalBody').dataset.h = '';
+    $('modalBody').innerHTML = `<div class="tHead" style="background:#5b4b3a"><small>Tawaran tukar</small><h3>🤝 Tukar Properti</h3></div>
+      <div class="tBody">
+        <label class="field">Dengan pemain <select id="trTo">${others.map(i => `<option value="${i}"${i === to ? ' selected' : ''}>${esc(v.players[i].name)} — ${money(v.players[i].cash)}</option>`).join('')}</select></label>
+        <div class="trCols">
+          <div><b>Kamu berikan</b><div class="trList">${list(myIdx, 'g')}</div>
+            <label class="field">Uang (maks ${money(me.cash)}) <input id="trGc" type="number" min="0" step="10" value="0"><small id="trGcPv">Rp 0</small></label></div>
+          <div><b>Kamu minta</b><div class="trList">${list(to, 't')}</div>
+            <label class="field">Uang (maks ${money(v.players[to].cash)}) <input id="trTc" type="number" min="0" step="10" value="0"><small id="trTcPv">Rp 0</small></label></div>
+        </div>
+        <p class="muted small">Angka uang dalam satuan Rp 10rb (100 = Rp 1jt). Hanya bisa saat giliranmu.</p>
+        <button id="trSend" class="primary wide">Kirim Tawaran</button>
+      </div>`;
+    $('trTo').onchange = () => buildTrade(currentView(), +$('trTo').value);
+    const pv = (a, b) => { $(a).oninput = () => { $(b).textContent = money(+$(a).value || 0); }; };
+    pv('trGc', 'trGcPv'); pv('trTc', 'trTcPv');
+    $('trSend').onclick = () => {
+      const gp = [...document.querySelectorAll('[data-g]:checked')].map(x => +x.dataset.g);
+      const tp = [...document.querySelectorAll('[data-t]:checked')].map(x => +x.dataset.t);
+      const d = { to: +$('trTo').value, gp, tp, gc: Math.max(0, Math.round(+$('trGc').value || 0)), tc: Math.max(0, Math.round(+$('trTc').value || 0)) };
+      const cv = currentView();
+      if (!cv || cv.turn !== myIdx || cv.step === 'buy' || cv.step === 'auction') { toast('Tawaran tukar hanya bisa dikirim saat giliranmu.'); return; }
+      closeModal();
+      sendAction('trade', d);
+    };
+  }
+
+  // ---------- kartu ----------
+  function checkCard(v) {
+    if (!v.card || v.card.id === shownCard) return;
+    if (!lastView) { shownCard = v.card.id; return; }
+    pendingCard = v.card;
+    if (!Scene3D.busy()) showCard();
+  }
+  function showCard() {
+    const c = pendingCard;
+    if (!c) return;
+    pendingCard = null; shownCard = c.id;
+    const C = (c.d === 'chance' ? E.CHANCE : E.CHEST)[c.i];
+    const el = $('cardPop'), v = currentView();
+    el.className = c.d;
+    el.innerHTML = `<div class="cpHead">${c.d === 'chance' ? '❓ KESEMPATAN' : '💰 DANA UMUM'}</div><div class="cpText">${esc(C.m)}</div>
+      <div class="cpWho">${v && v.players[c.p] ? chip(v, c.p) : ''}</div>`;
+    el.hidden = false;
+    Snd.card();
+    clearTimeout(cardTimer);
+    cardTimer = setTimeout(() => { el.hidden = true; }, 3800);
+  }
+
+  function renderOver(v) {
+    if (v.phase === 'over') {
+      if (overShown) return;
+      overShown = true;
+      closeModal();
+      const w = v.winner, win = w === myIdx;
+      $('overTitle').textContent = win ? '🏆 Kamu Menang!' : `🏆 ${w >= 0 ? v.players[w].name : '?'} Menang`;
+      $('overText').innerHTML = (v.rank || []).map(([i, val], k) => `<div class="rk"><span>${k + 1}. ${chip(v, i)}</span><b>${money(val)}</b></div>`).join('') +
+        v.players.map((p, i) => (p && p.out ? `<div class="rk out"><span>${chip(v, i)}</span><small>bangkrut</small></div>` : '')).join('');
+      const btns = [];
+      if (mode === 'local') btns.push(['▶ Main lagi', 'primary', () => startLocal(localCfg.cfg, localCfg.nBots, localCfg.level)]);
+      else if (authoritative()) btns.push(['↺ Kembali ke lobby', 'primary', () => { E.resetGame(g); overShown = false; syncPlayers(true); commit(); showOverlay(null); }]);
+      else btns.push(['Tutup (menunggu host)', '', () => showOverlay(null)]);
+      btns.push(['Menu utama', '', () => leaveCurrent()]);
+      setOverBtns(btns);
+      if (win) Snd.win();
+      showOverlay('overCard');
+      return;
+    }
+    if (overShown) { overShown = false; if (!$('overCard').hidden) showOverlay(null); }
+    const me = myIdx >= 0 ? v.players[myIdx] : null;
+    if (mode === 'local' && me && me.out && !bustShown) {
+      bustShown = true;
+      $('overTitle').textContent = '💸 Kamu Bangkrut';
+      $('overText').textContent = 'Semua asetmu habis. Mau lanjut menonton para bot?';
+      setOverBtns([
+        ['▶ Main lagi', 'primary', () => startLocal(localCfg.cfg, localCfg.nBots, localCfg.level)],
+        ['👀 Tonton bot (cepat)', '', () => { watchBots = true; showOverlay(null); }],
+        ['Menu utama', '', () => leaveCurrent()],
+      ]);
+      showOverlay('overCard');
+    }
+  }
+  function setOverBtns(list) {
+    const box = $('overBtns'); box.innerHTML = '';
+    list.forEach(([label, cls, fn]) => {
+      const b = document.createElement('button'); b.textContent = label; b.className = (cls ? cls + ' ' : '') + 'wide';
+      b.onclick = fn; box.appendChild(b);
+    });
+  }
+
+  function playSounds(v, p) {
+    if (!p || v.phase !== 'play') return;
+    const s = snap(v);
+    if (s.who === myIdx && myIdx >= 0 && p.who !== myIdx) Snd.ding();
+    if (s.own > p.own) Snd.buy();
+    if (s.hs > p.hs) Snd.build();
+    if (s.jail.some((j, i) => j === 1 && !p.jail[i])) setTimeout(() => Snd.jail(), 700);
+    if (s.out > p.out) Snd.bust();
+    if (myIdx >= 0 && s.own === p.own) { if (s.cash > p.cash) Snd.coin(); else if (s.cash < p.cash) Snd.pay(); }
+  }
+
+  // timer giliran (bar di panel aksi & daftar pemain)
+  function uiTick() {
+    const v = currentView();
+    if (!v || v.phase !== 'play') return;
+    const w = E.whoActs(v), dl = v.deadline, total = (v.step === 'auction' ? Math.min(15, v.cfg.turn) : v.cfg.turn) * 1000;
+    const frac = dl && total ? Math.max(0, Math.min(1, (dl - now()) / total)) : 0;
+    const col = frac > 0.4 ? '#2fbf71' : frac > 0.2 ? '#f0b429' : '#e5484d';
+    const tb = $('timerBar');
+    if (tb) { tb.style.width = (w === myIdx ? frac * 100 : 0) + '%'; tb.style.background = col; }
+    document.querySelectorAll('[data-tp]').forEach(el => {
+      const i = +el.dataset.tp, bar = el.firstChild;
+      bar.style.width = (i === w && dl ? frac * 100 : 0) + '%'; bar.style.background = col;
+    });
+  }
+
+  // ---------- event ----------
+  let activeTab = store.get('mn_tab', 'bot');
+  function setTab(t) {
+    activeTab = t; store.set('mn_tab', t);
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+    $('tabBot').hidden = t !== 'bot'; $('tabOnline').hidden = t !== 'online';
+    $('btnPlayBot').hidden = t !== 'bot'; $('btnCreate').hidden = t !== 'online';
+    document.querySelectorAll('.onlineOnly').forEach(e => { e.hidden = t !== 'online'; });
+    document.querySelectorAll('.botOnly').forEach(e => { e.hidden = t !== 'bot'; });
+    if (t === 'online') refreshRooms();
+  }
+  function primaryAction() {
+    const b = document.querySelector('#actions button.go');
+    if (b && !b.disabled && ['roll', 'end'].includes(b.dataset.a)) b.click();
+  }
+
+  function bind() {
+    $('nameIn').value = store.get('mn_name', '');
+    $('nameIn').addEventListener('input', () => store.set('mn_name', $('nameIn').value.trim().slice(0, 16)));
+    const OPTS = ['optBots', 'optLevel', 'optCash', 'optRounds', 'optAuction', 'optTurn', 'optSpeed'];
+    const saved = store.get('mn_opts', null);
+    if (saved) Object.entries(saved).forEach(([id, val]) => { if ($(id)) $(id).value = val; });
+    const saveOpts = () => store.set('mn_opts', Object.fromEntries(OPTS.map(id => [id, $(id).value])));
+    document.querySelectorAll('#menuCard select').forEach(s => s.addEventListener('change', saveOpts));
+    document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+    document.addEventListener('pointerdown', () => Snd.init());
+
+    $('btnPlayBot').onclick = () => startLocal(readCfg(false), +$('optBots').value, +$('optLevel').value);
+    $('btnCreate').onclick = () => createRoom();
+    $('btnJoin').onclick = () => joinRoom($('joinCode').value);
+    $('joinCode').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom($('joinCode').value); });
+    $('btnRefresh').onclick = refreshRooms;
+    $('roomList').addEventListener('click', e => { const b = e.target.closest('[data-code]'); if (b) joinRoom(b.dataset.code); });
+
+    $('btnLeave').onclick = () => {
+      const v = currentView();
+      const playing = v && v.phase === 'play' && myIdx >= 0 && !v.players[myIdx].out;
+      if (playing && !confirm(mode === 'online' ? 'Keluar dari room? Kamu akan dianggap bangkrut.' : 'Keluar dari permainan?')) return;
+      leaveCurrent();
+    };
+    $('btnLog').onclick = () => { $('side').hidden = !$('side').hidden; store.set('mn_side', !$('side').hidden); };
+    $('btnSideClose').onclick = () => { $('side').hidden = true; store.set('mn_side', false); };
+    $('btnCam').onclick = () => Scene3D.resetCam();
+    const sndIcon = () => { $('btnSound').textContent = Snd.on ? '🔊' : '🔇'; };
+    sndIcon();
+    $('btnSound').onclick = () => { Snd.on = !Snd.on; store.set('mn_snd', Snd.on); sndIcon(); };
+    const copyLink = () => {
+      const url = location.origin + location.pathname + '?room=' + Net.code;
+      (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(() => toast('Link undangan disalin!'), () => prompt('Salin link ini:', url));
+    };
+    $('infoRoom').onclick = copyLink;
+    $('btnCopyLink').onclick = copyLink;
+
+    $('actions').addEventListener('click', e => {
+      const b = e.target.closest('button[data-a]');
+      const tc = e.target.closest('[data-tile]');
+      if (!b) { if (tc) openModal('tile', +tc.dataset.tile); return; }
+      const a = b.dataset.a;
+      if (a === 'assets') return openModal('assets');
+      if (a === 'trade') return openModal('trade');
+      if (a === 'bidplus') {
+        const v = currentView(), bi = $('bidIn');
+        if (bi && v && v.auc) { bi.value = Math.min(v.players[myIdx].cash, Math.max(+bi.value || 0, v.auc.bid) + +b.dataset.v); bidPreview(); }
+        return;
+      }
+      if (a === 'bid') return sendAction('bid', { a: Math.round(+$('bidIn').value || 0) });
+      if (a === 'bankrupt' && !confirm('Nyatakan bangkrut? Semua asetmu akan diserahkan.')) return;
+      if (a === 'decline') {
+        const v = currentView();
+        if (v && v.players[myIdx].cash >= TL[v.players[myIdx].pos].p && !v.cfg.auction && !confirm('Lewati tanpa membeli?')) return;
+      }
+      sendAction(a);
+    });
+    $('modal').addEventListener('click', e => {
+      if (e.target.id === 'modal' || e.target.closest('[data-close]')) return closeModal();
+      const m = e.target.closest('button[data-m]');
+      if (m) return sendAction(m.dataset.m, { t: +m.dataset.t });
+      const tc = e.target.closest('[data-tile]');
+      if (tc && !e.target.closest('label')) openModal('tile', +tc.dataset.tile);
+    });
+    $('players').addEventListener('click', e => { const r = e.target.closest('[data-p]'); if (r) openModal('player', +r.dataset.p); });
+    $('status').addEventListener('click', e => { const tc = e.target.closest('[data-tile]'); if (tc) openModal('tile', +tc.dataset.tile); });
+    $('cardPop').onclick = () => { $('cardPop').hidden = true; };
+
+    document.addEventListener('keydown', e => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || !mode) return;
+      const k = e.key.toLowerCase();
+      if (k === 'escape') closeModal();
+      else if (k === ' ' || k === 'enter') { if (!modal) { e.preventDefault(); primaryAction(); } }
+      else if (k === 'b') { const b = document.querySelector('#actions [data-a="buy"]'); if (b && !b.disabled) b.click(); }
+      else if (k === 'a') openModal('assets');
+    });
+
+    $('chatForm').addEventListener('submit', e => { e.preventDefault(); sendChat($('chatIn').value); $('chatIn').value = ''; });
+
+    $('btnAddBot').onclick = () => {
+      if (!authoritative() || g.phase !== 'lobby') return;
+      const i = freeSeat(g); if (i < 0) return;
+      const used = new Set(g.players.filter(Boolean).map(s => s.name));
+      const name = BOT_NAMES.slice().sort(() => Math.random() - 0.5).find(n => !used.has(n)) || 'Bot ' + (i + 1);
+      E.addPlayer(g, i, { id: 'bot' + Date.now().toString(36), name, bot: +$('lpBotLevel').value });
+      commit();
+    };
+    $('lpSeats').addEventListener('click', e => {
+      const b = e.target.closest('[data-rm]');
+      if (!b || !authoritative() || g.phase !== 'lobby') return;
+      g.players[+b.dataset.rm] = null; commit();
+    });
+    $('btnStart').onclick = () => {
+      if (!authoritative() || g.phase !== 'lobby') return;
+      syncPlayers(true);
+      if (!E.startGame(g)) { toast('Butuh minimal 2 pemain/bot.'); return; }
+      resetHk();
+      commit();
+    };
+
+    window.addEventListener('beforeunload', () => {
+      if (mode === 'online' && isHost && Net.ref) {
+        const others = Object.keys(Net.players).filter(id => id !== myId && Net.players[id] && Net.players[id].conn).sort();
+        if (others.length) Net.ref.child('host').set(others[0]);
+      }
+    });
+    setInterval(uiTick, 200);
+  }
+
+  // ---------- start ----------
+  Scene3D.init($('c'), {
+    plates: $('plates'),
+    onTile: t => { if (mode) openModal('tile', t); },
+    onCard: () => { if (pendingCard) showCard(); },
+    onIdle: () => { render(); if (pendingCard) showCard(); },
+    onDice: () => Snd.dice(),
+    onStep: () => Snd.step(),
+  });
+  bind();
+  setTab(activeTab);
+  showOverlay('menuCard');
+  const qRoom = new URLSearchParams(location.search).get('room');
+  if (qRoom) { setTab('online'); $('joinCode').value = qRoom.toUpperCase(); joinRoom(qRoom); }
+  window.__mono = { get g() { return g; }, get view() { return currentView(); }, sendAction, E };
+})();

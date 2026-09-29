@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Monopoli Indonesia 3D</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="plates"></div>
+
+  <!-- HUD atas -->
+  <div id="topbar" hidden>
+    <div class="info">
+      <button id="infoRoom" class="chipbtn" hidden title="Salin link undangan"></button>
+    </div>
+    <div class="tbtns">
+      <button id="btnCam" title="Reset kamera">🎥</button>
+      <button id="btnLog" title="Log & chat">📜</button>
+      <button id="btnSound" title="Suara">🔊</button>
+      <button id="btnLeave">✕ Keluar</button>
+    </div>
+  </div>
+
+  <div id="status" hidden></div>
+  <div id="players" hidden></div>
+  <div id="actions" hidden></div>
+  <div id="cardPop" hidden></div>
+
+  <div id="modal" hidden>
+    <div class="mBox">
+      <button class="mClose" data-close>✕</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- log & chat -->
+  <div id="side" hidden>
+    <div class="sideHead"><b>Riwayat</b><button id="btnSideClose">✕</button></div>
+    <div id="logList"></div>
+    <div id="chatBox" hidden>
+      <div id="chatList"></div>
+      <form id="chatForm"><input id="chatIn" maxlength="160" placeholder="Ketik pesan…" autocomplete="off"><button>Kirim</button></form>
+    </div>
+  </div>
+
+  <!-- lobby room online -->
+  <div id="lobbyPanel" hidden>
+    <h2>Room <span id="lpCode"></span></h2>
+    <p class="muted">Bagikan kode atau link ke teman. Maksimal 6 pemain (manusia + bot).</p>
+    <button id="btnCopyLink" class="wide">🔗 Salin link undangan</button>
+    <div id="lpSeats"></div>
+    <div id="lpHost">
+      <div class="row">
+        <select id="lpBotLevel">
+          <option value="1">Bot Mudah</option>
+          <option value="2" selected>Bot Sedang</option>
+          <option value="3">Bot Sulit</option>
+        </select>
+        <button id="btnAddBot">+ Tambah Bot</button>
+      </div>
+      <button id="btnStart" class="primary wide">▶ Mulai Game</button>
+    </div>
+    <p id="lpWait" class="muted">Menunggu host memulai game…</p>
+  </div>
+
+  <!-- overlay menu -->
+  <div id="overlay">
+    <div class="card" id="menuCard">
+      <h1>MONOPOLI</h1>
+      <p class="sub"><span class="flag"></span> Edisi Indonesia · 3D</p>
+      <label class="field">Nama kamu <input id="nameIn" maxlength="16" placeholder="Pemain"></label>
+      <div class="tabs">
+        <button data-tab="bot" class="on">🤖 Lawan Bot</button>
+        <button data-tab="online">🌐 Online</button>
+      </div>
+
+      <div id="tabBot">
+        <div class="grid">
+          <label>Jumlah bot
+            <select id="optBots"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
+          </label>
+          <label>Level bot
+            <select id="optLevel"><option value="1">Mudah</option><option value="2" selected>Sedang</option><option value="3">Sulit</option><option value="0">Campur</option></select>
+          </label>
+        </div>
+      </div>
+
+      <div id="tabOnline" hidden>
+        <div class="conn"><span id="connDot"></span><span id="connText">Belum terhubung</span></div>
+        <div class="row">
+          <input id="joinCode" maxlength="5" placeholder="KODE ROOM" autocomplete="off">
+          <button id="btnJoin">Gabung</button>
+        </div>
+        <div class="roomsHead"><b>Room terbuka</b><button id="btnRefresh" title="Muat ulang">↻</button></div>
+        <div id="roomList"><div class="muted">—</div></div>
+        <div id="lobbyError" class="error" hidden></div>
+      </div>
+
+      <details class="settings">
+        <summary>Pengaturan permainan</summary>
+        <div class="grid">
+          <label>Modal awal
+            <select id="optCash"><option value="1000">Rp 10jt</option><option value="1500" selected>Rp 15jt</option><option value="2000">Rp 20jt</option><option value="2500">Rp 25jt</option></select>
+          </label>
+          <label>Batas putaran
+            <select id="optRounds"><option value="0">Tanpa batas</option><option value="20">20 putaran</option><option value="30" selected>30 putaran</option><option value="50">50 putaran</option></select>
+          </label>
+          <label>Lelang jika tidak dibeli
+            <select id="optAuction"><option value="1" selected>Ya</option><option value="0">Tidak</option></select>
+          </label>
+          <label class="botOnly">Kecepatan bot
+            <select id="optSpeed"><option value="1" selected>Normal</option><option value="2">Cepat</option></select>
+          </label>
+          <label class="onlineOnly" hidden>Waktu giliran
+            <select id="optTurn"><option value="20">20 detik</option><option value="30" selected>30 detik</option><option value="45">45 detik</option><option value="60">60 detik</option></select>
+          </label>
+        </div>
+      </details>
+
+      <button id="btnPlayBot" class="primary wide">▶ Mulai Main</button>
+      <button id="btnCreate" class="primary wide" hidden>＋ Buat Room Baru</button>
+
+      <details class="help">
+        <summary>❓ Cara main</summary>
+        <ul>
+          <li>Lempar dadu, jalankan pion, lalu beli kota/stasiun/utilitas yang belum dimiliki. Kalau tidak dibeli, properti dilelang.</li>
+          <li>Kuasai <b>semua kota satu warna</b> agar sewa jadi 2× dan bisa membangun rumah (merata) sampai hotel.</li>
+          <li>Dadu kembar = main lagi; kembar 3× langsung masuk penjara.</li>
+          <li>Kekurangan uang? Jual rumah atau gadaikan aset lewat 🏠 Aset. Kalau tetap tidak cukup, bangkrut.</li>
+          <li>Tukar properti dengan pemain lain lewat 🤝 Tukar saat giliranmu.</li>
+          <li>Pemenang: pemain terakhir yang tidak bangkrut, atau yang terkaya saat batas putaran tercapai.</li>
+          <li>Klik petak di papan untuk melihat harga & sewa. Drag = putar kamera, scroll = zoom. Spasi = lempar dadu / akhiri giliran.</li>
+        </ul>
+      </details>
+    </div>
+
+    <div class="card" id="overCard" hidden>
+      <h2 id="overTitle"></h2>
+      <div id="overText"></div>
+      <div class="col" id="overBtns"></div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="engine.js"></script>
+  <script src="scene.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
