@@ -623,7 +623,22 @@
   function btn(a, label, cls, dis, title) {
     return `<button data-a="${a}" class="${cls || ''}"${dis ? ' disabled' : ''}${title ? ` title="${esc(title)}"` : ''}>${label}</button>`;
   }
-  const TOOLS = '<div class="aTools">' + btn('assets', '🏠 Aset') + btn('trade', '🤝 Tukar') + '</div>';
+  const ic = (e, cls) => `<i class="ic${cls ? ' ' + cls : ''}">${e}</i>`;
+  const PIPS = { 1: [[12, 12]], 2: [[7, 7], [17, 17]], 3: [[7, 7], [12, 12], [17, 17]], 4: [[7, 7], [17, 7], [7, 17], [17, 17]],
+    5: [[7, 7], [17, 7], [12, 12], [7, 17], [17, 17]], 6: [[7, 6], [17, 6], [7, 12], [17, 12], [7, 18], [17, 18]] };
+  /** Ikon dadu SVG (putih dengan titik), dipakai di tombol lempar dadu. */
+  function dieSvg(n, cls) {
+    const pips = PIPS[n] || PIPS[5];
+    return `<svg class="die ${cls}" viewBox="0 0 24 24"><rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="#fdfcf7" stroke="#c9c2b0" stroke-width="1"/>` +
+      pips.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${n === 1 ? 3.2 : 2.1}" fill="${n === 1 ? '#d62828' : '#1b1b1b'}"/>`).join('') + '</svg>';
+  }
+  function miniDeed(t) {
+    const T = TL[t], col = T.t === 'prop' ? E.GROUPS[T.g].c : T.t === 'rail' ? '#3a3f4a' : '#2f6f8f';
+    const icon = T.t === 'rail' ? '🚆' : T.t === 'util' ? (T.n === 'PLN' ? '⚡' : '🚰') : '🏙️';
+    return `<div class="miniDeed" data-tile="${t}" style="--c:${col}"><div class="mdH"><small>HAK MILIK</small><b>${esc(T.n.replace('Stasiun ', 'St. '))}</b></div>
+      <div class="mdB"><span>${icon}</span><small>Harga</small><b>${money(T.p)}</b></div></div>`;
+  }
+  const TOOLS = '<div class="aTools">' + btn('assets', ic('🏠') + '<span>Aset</span><kbd>A</kbd>', 'tool') + btn('trade', ic('🤝') + '<span>Tukar</span>', 'tool') + '</div>';
   function actionsHTML(v) {
     if (v.phase !== 'play') return '';
     const me = myIdx >= 0 ? v.players[myIdx] : null;
@@ -635,44 +650,55 @@
         const side = (ps, c) => (ps.length ? ps.map(tileChip).join(' ') : '') + (c ? ` <span class="tc money">${money(c)}</span>` : '') || '<span class="muted">—</span>';
         return `<div class="aHead">🤝 Tawaran tukar dari ${chip(v, tr.from)}</div>
           <div class="trView"><div><small>Kamu dapat</small><div>${side(tr.gp, tr.gc)}</div></div><div><small>Kamu berikan</small><div>${side(tr.tp, tr.tc)}</div></div></div>
-          <div class="aBtns">${btn('tradeok', '✔ Terima', 'go', wait)}${btn('tradeno', '✕ Tolak', 'no', wait)}</div>${timer}`;
+          <div class="aBtns">${btn('tradeok', ic('✔') + 'Terima', 'go', wait)}${btn('tradeno', ic('✕') + 'Tolak', 'no', wait)}</div>${timer}`;
       }
-      if (tr.from === myIdx) return `<div class="aHead">⏳ Menunggu jawaban ${chip(v, tr.to)}…</div><div class="aBtns">${btn('tradecancel', 'Batalkan tawaran', '', wait)}</div>`;
+      if (tr.from === myIdx) return `<div class="aHead">⏳ Menunggu jawaban ${chip(v, tr.to)}<span class="dots"><i></i><i></i><i></i></span></div><div class="aBtns">${btn('tradecancel', ic('↩') + 'Batalkan tawaran', 'slate', wait)}</div>`;
       return '';
     }
     if (Scene3D.busy()) return '';
     if (v.step === 'auction' && v.auc) return auctionHTML(v, me, wait, timer);
     if (!me || me.out || v.turn !== myIdx) return '';
+    const ribbon = sub => `<div class="aRibbon" style="--c:${PCOL[myIdx]}"><span><i></i>GILIRANMU</span><small>${sub}</small></div>`;
     switch (v.step) {
       case 'roll':
         if (me.jail) {
-          return `<div class="aHead">🔒 Kamu di penjara <small>(percobaan ${me.jail}/3)</small></div>
-            <div class="aBtns">${btn('roll', '🎲 Coba kembar', 'go', wait)}${btn('jailpay', 'Bayar ' + money(E.JAIL_FINE), '', wait || me.cash < E.JAIL_FINE)}${me.jc.length ? btn('jailcard', '🎫 Pakai kartu', '', wait) : ''}</div>${TOOLS}${timer}`;
+          return `<div class="jailBox"><div class="bars">${ic('🔒', 'big')}</div><div><b>Kamu di penjara</b>
+              <small>Percobaan ke-${me.jail} dari 3 · lempar kembar untuk bebas gratis</small></div></div>
+            <div class="aBtns">${btn('roll', `<span class="dice2 sm">${dieSvg(6, 'd1')}${dieSvg(6, 'd2')}</span>Coba kembar`, 'go roll', wait)}
+              ${btn('jailpay', ic('💸') + 'Bayar ' + money(E.JAIL_FINE), 'warm', wait || me.cash < E.JAIL_FINE)}${me.jc.length ? btn('jailcard', ic('🎫') + 'Pakai kartu', 'blue', wait) : ''}</div>${TOOLS}${timer}`;
         }
-        return `<div class="aBtns">${btn('roll', v.again ? '🎲 Lempar lagi <kbd>Spasi</kbd>' : '🎲 Lempar Dadu <kbd>Spasi</kbd>', 'go big', wait)}</div>${TOOLS}${timer}`;
+        return `${ribbon(`Putaran ${v.round}${v.cfg.rounds ? '/' + v.cfg.rounds : ''}`)}
+          <div class="aBtns">${btn('roll', `<span class="dice2">${dieSvg(v.dice[0], 'd1')}${dieSvg(v.dice[1], 'd2')}</span>
+            <span class="bl"><b>${v.again ? 'Lempar Lagi!' : 'Lempar Dadu'}</b><small>${v.again ? 'dadu kembar · main sekali lagi' : 'tekan Spasi'}</small></span>`, 'go roll big', wait)}</div>${TOOLS}${timer}`;
       case 'buy': {
-        const t = me.pos, T = TL[t];
-        const can = me.cash >= T.p;
-        return `<div class="aHead">${tileChip(t)} <small>dijual ${money(T.p)}</small></div>
-          <div class="aInfo">${rentLine(t)}</div>
-          <div class="aBtns">${btn('buy', `Beli ${money(T.p)} <kbd>B</kbd>`, 'go', wait || !can, can ? '' : 'Uang tidak cukup — gadaikan aset dulu')}${btn('decline', v.cfg.auction ? '🔨 Lelang' : 'Lewati', 'no', wait)}</div>
-          ${can ? '' : '<div class="aInfo warn">Uang kurang. Gadaikan aset lewat 🏠 Aset, atau lelang.</div>'}${TOOLS}${timer}`;
+        const t = me.pos, T = TL[t], can = me.cash >= T.p;
+        const gt = T.t === 'prop' ? E.GROUP_TILES[T.g] : T.t === 'rail' ? E.RAILS : E.UTILS;
+        const have = gt.filter(x => v.own[x] === myIdx).length;
+        const kind = T.t === 'prop' ? `kota ${E.GROUPS[T.g].n}` : T.t === 'rail' ? 'stasiun' : 'utilitas';
+        const hint = have === gt.length - 1 ? `<div class="bHint gold">⭐ Beli ini untuk melengkapi ${kind}!</div>`
+          : have ? `<div class="bHint">Kamu sudah punya ${have}/${gt.length} ${kind}</div>` : '';
+        return `<div class="buyBox">${miniDeed(t)}<div class="buyInfo"><small>Properti ini dijual</small><b>${esc(T.n)}</b>
+            <div class="bRent">${rentLine(t)}</div>${hint}</div></div>
+          <div class="aBtns">${btn('buy', `${ic('🪙')}<span class="bl"><b>Beli ${money(T.p)}</b><small>tekan B</small></span>`, 'go', wait || !can, can ? '' : 'Uang tidak cukup — gadaikan aset dulu')}
+            ${btn('decline', v.cfg.auction ? `${ic('🔨')}<span class="bl"><b>Lelang</b><small>semua boleh menawar</small></span>` : ic('➜') + 'Lewati', 'warm', wait)}</div>
+          ${can ? '' : `<div class="aInfo warn">Uangmu ${money(me.cash)} — kurang ${money(T.p - me.cash)}. Gadaikan aset lewat 🏠 Aset, atau lelang.</div>`}${TOOLS}${timer}`;
       }
       case 'debt': {
         const d = v.debt, to = d.to >= 0 ? chip(v, d.to) : d.to === -2 ? 'semua pemain' : 'Bank';
-        return `<div class="aHead warn">💸 Harus bayar ${money(d.a)} ke ${to}</div>
-          <div class="aInfo">Uangmu ${money(me.cash)}. Jual rumah / gadaikan aset lewat 🏠 Aset, atau tawarkan tukar.</div>
-          <div class="aBtns">${btn('pay', 'Bayar ' + money(d.a), 'go', wait || me.cash < d.a)}${btn('bankrupt', '💥 Bangkrut', 'no', wait)}</div>${TOOLS}${timer}`;
+        const short = Math.max(0, d.a - me.cash);
+        return `<div class="debtBox">${ic('💸', 'big')}<div><small>Kamu harus membayar ke ${to}</small><div class="dAmt">${money(d.a)}</div>
+            <small>Uangmu ${money(me.cash)}${short ? ` · <b class="neg">kurang ${money(short)}</b>` : ' · <b class="pos">cukup!</b>'}</small></div></div>
+          <div class="aInfo">Jual rumah / gadaikan aset lewat 🏠 Aset, atau tawarkan tukar.</div>
+          <div class="aBtns">${btn('pay', ic('💰') + 'Bayar ' + money(d.a), 'go', wait || me.cash < d.a)}${btn('bankrupt', ic('💥') + 'Bangkrut', 'no', wait)}</div>${TOOLS}${timer}`;
       }
       case 'end':
-        return `<div class="aBtns">${btn('end', '✔ Akhiri Giliran <kbd>Spasi</kbd>', 'go big', wait)}</div>${TOOLS}${timer}`;
+        return `${ribbon('selesai bergerak · bangun rumah atau tukar dulu kalau mau')}
+          <div class="aBtns">${btn('end', `${ic('✔')}<span class="bl"><b>Akhiri Giliran</b><small>tekan Spasi</small></span>`, 'go end big', wait)}</div>${TOOLS}${timer}`;
     }
     return '';
   }
   function auctionHTML(v, me, wait, timer) {
     const a = v.auc, T = TL[a.t], mine = a.cur === myIdx && me && !me.out;
-    const col = T.t === 'prop' ? E.GROUPS[T.g].c : T.t === 'rail' ? '#3a3f4a' : '#2f6f8f';
-    const icon = T.t === 'rail' ? '🚆' : T.t === 'util' ? (T.n === 'PLN' ? '⚡' : '🚰') : '🏙️';
     // peserta: 👑 tertinggi, … sedang menawar, "lewat" sudah mundur
     const people = v.players.map((p, i) => {
       if (!p || p.out) return '';
@@ -683,8 +709,7 @@
     let h = `<div class="auc">
       <div class="aucTop"><span class="gavel">🔨</span><b>LELANG</b><small>penawar tertinggi mendapatkan properti</small></div>
       <div class="aucBody">
-        <div class="miniDeed" data-tile="${a.t}" style="--c:${col}"><div class="mdH"><small>HAK MILIK</small><b>${esc(T.n.replace('Stasiun ', 'St. '))}</b></div>
-          <div class="mdB"><span>${icon}</span><small>Harga bank</small><b>${money(T.p)}</b></div></div>
+        ${miniDeed(a.t)}
         <div class="aucBid">
           <small>Tawaran tertinggi</small>
           <div class="aucAmt${a.by >= 0 ? '' : ' none'}">${a.by >= 0 ? money(a.bid) : 'Belum ada'}</div>
