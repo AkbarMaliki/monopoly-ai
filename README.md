@@ -28,7 +28,7 @@ Pilih **mode permainan** di menu (berlaku untuk lawan bot maupun room online):
 | 🏠 **Langsung Bangun** | Saat membeli kota bisa **sekalian beli 1 rumah**. Setiap kali pionmu mampir lagi di kota milikmu, boleh upgrade **1 tingkat** (rumah ke-2, 3, 4, lalu hotel) — tanpa syarat satu warna. Gadai/tukar hanya terhalang bangunan di kota itu sendiri. |
 
 
-- **Lawan Bot**: pilih jumlah bot (1–5), level (Mudah / Sedang / Sulit / Campur), modal awal, batas putaran, lelang, dan kecepatan bot.
+- **Lawan Bot**: pilih jumlah bot (1–5), level (Mudah / Sedang / Sulit / Campur), modal awal, batas putaran, lelang, dan kecepatan awal.
 - **Online**:
   - **Buat Room Baru** → dapat kode 5 karakter + link undangan (`?room=KODE`). Host bisa menambah/menghapus bot di lobby, lalu tekan **Mulai Game**.
   - **Gabung** dengan kode, atau klik room di daftar "Room terbuka". Yang masuk setelah game dimulai jadi penonton.
@@ -43,6 +43,9 @@ Pilih **mode permainan** di menu (berlaku untuk lawan bot maupun room online):
 - **Di papan**: properti yang dibeli ditandai bendera + strip warna pemilik. Setelah satu warna lengkap, bangunan muncul sebagai
   rumah hijau (1–4) lalu berganti jadi hotel merah, dengan animasi muncul.
 - Kontrol: klik petak untuk melihat harga & sewa, drag untuk memutar kamera, scroll/pinch untuk zoom, 🎥 untuk reset kamera.
+- **⏩ Kecepatan 1x / 2x / 3x / 5x** (kanan atas, bisa diganti kapan saja): mempercepat lemparan dadu, langkah pion, kartu,
+  animasi bangunan, dan jeda berpikir bot. Online: hanya host yang bisa mengubah, berlaku untuk semua pemain (`cfg.speed`).
+  Di layar sempit hanya tombol aktif yang tampil — ketuk untuk ganti ke kecepatan berikutnya.
   Keyboard: **Spasi** = lempar dadu / akhiri giliran, **B** = beli, **A** = aset, **Esc** = tutup jendela.
 
 ## Aturan yang diterapkan

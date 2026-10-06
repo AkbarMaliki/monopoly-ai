@@ -92,9 +92,12 @@
   function readCfg(online) {
     return {
       cash: +$('optCash').value, rounds: +$('optRounds').value, auction: +$('optAuction').value,
-      turn: online ? +$('optTurn').value : 0, speed: online ? 1 : +$('optSpeed').value, build: gameMode,
+      turn: online ? +$('optTurn').value : 0, speed: spdOf({ cfg: { speed: $('optSpeed').value } }), build: gameMode,
     };
   }
+  // kecepatan animasi & jeda bot (cfg.speed); online: dipegang host, sama untuk semua
+  const SPEEDS = [1, 2, 3, 5];
+  const spdOf = v => { const s = +(v && v.cfg && v.cfg.speed); return SPEEDS.includes(s) ? s : 1; };
   const MODE_NAME = { classic: '🚩 Sewa Bendera', direct: '🏠 Langsung Bangun' };
   const modeOf = c => (c && c.build === 'direct' ? 'direct' : 'classic');
   let gameMode = store.get('mn_mode', 'classic') === 'direct' ? 'direct' : 'classic';
@@ -116,30 +119,34 @@
 
   // ---------- loop host / lokal ----------
   function authoritative() { return !!g && (mode === 'local' || isHost); }
-  function resetHk() { hk = { rid: g ? g.rid : 0, mid: g ? g.mid : 0, animUntil: 0, seq: -1, start: 0, delay: 0 }; }
+  function resetHk() { hk = { rid: g ? g.rid : 0, mid: g ? g.mid : 0, anim: 0, last: 0, seq: -1, start: 0, delay: 0 }; }
 
   function hostTick() {
     if (!authoritative() || g.phase !== 'play') return;
     const t = now();
     if (!hk) resetHk();
+    // sisa animasi (ms pada kecepatan 1x) dikurangi sesuai speed, jadi ganti speed di tengah animasi tetap sinkron dgn papan
+    const spd = spdOf(g);
+    if (hk.last) hk.anim = Math.max(0, hk.anim - (t - hk.last) * spd);
+    hk.last = t;
     if (g.rid !== hk.rid || g.mid !== hk.mid) {
-      hk.animUntil = t + E.animTime(g.mid !== hk.mid ? g.mv : [], g.rid !== hk.rid) + 150;
+      hk.anim = E.animTime(g.mid !== hk.mid ? g.mv : [], g.rid !== hk.rid) + 150;
       hk.rid = g.rid; hk.mid = g.mid;
     }
+    const animUntil = t + hk.anim / spd;
     const w = E.whoActs(g);
     if (w < 0) return;
     const p = g.players[w];
     if (g.seq !== hk.seq) {
-      hk.seq = g.seq; hk.start = Math.max(t, hk.animUntil);
-      const fast = watchBots || (g.cfg.speed || 1) > 1;
-      hk.delay = (g.step === 'auction' ? 450 + Math.random() * 500 : g.trade ? 1400 : 600 + Math.random() * 700) * (fast ? 0.35 : 1);
+      hk.seq = g.seq; hk.start = animUntil;
+      hk.delay = (g.step === 'auction' ? 450 + Math.random() * 500 : g.trade ? 1400 : 600 + Math.random() * 700) * (watchBots ? 0.35 : 1);
       let dl = 0;
       if (!p.bot && g.cfg.turn) dl = hk.start + (g.step === 'auction' ? Math.min(15, g.cfg.turn) : g.cfg.turn) * 1000;
       if ((g.deadline || 0) !== dl) { g.deadline = dl; commit(); return; }
     }
-    if (t < hk.animUntil) return;
+    if (hk.anim > 0) return;
     if (p.bot) {
-      if (t - hk.start < hk.delay) return;
+      if ((t - hk.start) * spd < hk.delay) return;
       const d = E.botDecide(g, w);
       if (!d || E.act(g, w, d.t, d.d)) forceAct(w);
       commit();
@@ -471,6 +478,7 @@
     myIdx = v.players.findIndex(p => p && p.id === myId);
     if (pendingSeq >= 0 && (pendingSeq !== v.seq || Date.now() - pendingAt > 3500)) pendingSeq = -1;
     Scene3D.update(v);
+    renderSpeed(v);
     renderPlayers(v);
     renderWallet(v);
     renderStatus(v);
@@ -939,6 +947,25 @@
     };
   }
 
+  // ---------- kecepatan ----------
+  let shownSpd = 0;
+  function renderSpeed(v) {
+    const s = spdOf(v), can = authoritative();
+    $('speedSeg').classList.toggle('ro', !can);
+    $('speedSeg').title = can ? 'Kecepatan animasi & bot' : `Kecepatan ${s}x (diatur host)`;
+    $('speedSeg').querySelectorAll('button').forEach(b => { b.classList.toggle('on', +b.dataset.s === s); b.disabled = !can; });
+    if (shownSpd && s !== shownSpd && !can) toast(`⏩ Host mengubah kecepatan ke ${s}x`);
+    shownSpd = s;
+  }
+  function setSpeed(s) {
+    if (!authoritative() || !SPEEDS.includes(s) || spdOf(g) === s) return;
+    g.cfg.speed = s;
+    if (localCfg && mode === 'local') localCfg.cfg.speed = s; // "Main lagi" ikut kecepatan terakhir
+    $('optSpeed').value = s; $('optSpeed').dispatchEvent(new Event('change'));
+    toast(`⏩ Kecepatan ${s}x`);
+    commit();
+  }
+
   // ---------- kartu ----------
   function checkCard(v) {
     if (!v.card || v.card.id === shownCard) return;
@@ -960,7 +987,9 @@
     const amt = delta ? `<div class="cpAmt ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '+' : '−'}${money(Math.abs(delta))}</div>` : '';
     const note = C.x === 'free' ? '<div class="cpNote">Kartu disimpan di dompet 🗝️</div>' : '';
     const sym = chance ? '?' : '💰', total = (chance ? E.CHANCE : E.CHEST).length;
+    const spd = spdOf(v);
     el.className = c.d;
+    el.style.setProperty('--spd', spd);
     el.innerHTML = `<div class="cpCard">
       <div class="cpFace cpBack"><div class="cpBackIn"><span>${sym}</span><b>${title}</b><small>MONOPOLI INDONESIA</small></div></div>
       <div class="cpFace cpFront">
@@ -974,7 +1003,7 @@
     el.hidden = false;
     Snd.card();
     clearTimeout(cardTimer);
-    cardTimer = setTimeout(() => { el.hidden = true; }, 4600);
+    cardTimer = setTimeout(() => { el.hidden = true; }, 4600 / spd);
   }
 
   function renderOver(v) {
@@ -1024,7 +1053,7 @@
     if (s.who === myIdx && myIdx >= 0 && p.who !== myIdx) Snd.ding();
     if (s.own > p.own) Snd.buy();
     if (s.hs > p.hs) Snd.build();
-    if (s.jail.some((j, i) => j === 1 && !p.jail[i])) setTimeout(() => Snd.jail(), 700);
+    if (s.jail.some((j, i) => j === 1 && !p.jail[i])) setTimeout(() => Snd.jail(), 700 / spdOf(v));
     if (s.out > p.out) Snd.bust();
     if (myIdx >= 0 && s.own === p.own) { if (s.cash > p.cash) Snd.coin(); else if (s.cash < p.cash) Snd.pay(); }
   }
@@ -1089,6 +1118,14 @@
     $('btnLog').onclick = () => { $('side').hidden = !$('side').hidden; store.set('mn_side', !$('side').hidden); };
     $('btnSideClose').onclick = () => { $('side').hidden = true; store.set('mn_side', false); };
     $('btnCam').onclick = () => Scene3D.resetCam();
+    $('speedSeg').addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      let s = +b.dataset.s;
+      // layar sempit: hanya tombol aktif yang tampil → klik untuk ganti ke kecepatan berikutnya
+      if (b.classList.contains('on') && matchMedia('(max-width: 760px)').matches) s = SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length];
+      setSpeed(s);
+    });
     const sndIcon = () => { $('btnSound').textContent = Snd.on ? '🔊' : '🔇'; };
     sndIcon();
     $('btnSound').onclick = () => { Snd.on = !Snd.on; store.set('mn_snd', Snd.on); sndIcon(); };

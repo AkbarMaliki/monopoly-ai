@@ -11,6 +11,8 @@ window.Scene3D = (() => {
   let renderer, scene, camera, controls, opts = {}, maxAniso = 1, canvasEl;
   let view = null, first = true, lastRid = -1, lastMid = -1, tagIdx = -1, focusIdx = -1, hover = -1, uiFocus = -1;
   let hlFocus, hlHover, turnRing, tagEl, diceAnim = null, cur = null, wasBusy = false;
+  // jam animasi: maju speed× lebih cepat dari jam nyata (fitur percepat 1x/2x/3x/5x)
+  let speed = 1, vt = 0, lastReal = 0;
   const tokens = [], diceM = [], ownTabs = {}, houseGroups = {}, mortPlanes = {}, flags = {}, queue = [], pops = [];
   const shared = {};
 
@@ -284,7 +286,7 @@ window.Scene3D = (() => {
   /** Animasi "muncul" (membal) untuk bangunan/bendera baru. */
   function pop(obj, delay) {
     obj.scale.setScalar(0.001);
-    pops.push({ obj, t0: performance.now() + (delay || 0) });
+    pops.push({ obj, t0: vt + (delay || 0) });
   }
   function makeMonas() {
     const g = new THREE.Group();
@@ -461,6 +463,7 @@ window.Scene3D = (() => {
 
   function update(v) {
     view = v;
+    speed = (v.cfg && +v.cfg.speed) || 1;
     const initial = first;
     for (let i = 0; i < 6; i++) {
       const p = v.players[i];
@@ -545,7 +548,7 @@ window.Scene3D = (() => {
 
   // ---------- animasi ----------
   function startDice(vals) {
-    const t0 = performance.now();
+    const t0 = vt;
     diceAnim = {
       t0, dur: E.ANIM.dice,
       parts: diceM.map((d, k) => {
@@ -591,7 +594,7 @@ window.Scene3D = (() => {
       if (el >= cur.dur) { tk.moving = false; tk.target.copy(tk.mesh.position); cur = null; }
     }
   }
-  function animate(t) {
+  function animate(t, real) {
     if (diceAnim) {
       const e = Math.min(1, (t - diceAnim.t0) / diceAnim.dur), s = 1 - Math.pow(1 - e, 3);
       diceAnim.parts.forEach((p, k) => {
@@ -613,12 +616,12 @@ window.Scene3D = (() => {
       p.obj.scale.setScalar(Math.max(0.001, s));
       if (e >= 1) { p.obj.scale.setScalar(1); pops.splice(k, 1); }
     }
-    Object.values(flags).forEach(f => { f.userData.cloth.rotation.y = Math.sin(t / 420 + f.userData.ph) * 0.35; });
+    Object.values(flags).forEach(f => { f.userData.cloth.rotation.y = Math.sin(real / 420 + f.userData.ph) * 0.35; });
     const b = busy();
     if (wasBusy && !b) { settle(false); if (opts.onIdle) opts.onIdle(); }
     wasBusy = b;
 
-    const pulse = 0.5 + 0.5 * Math.sin(t / 260);
+    const pulse = 0.5 + 0.5 * Math.sin(real / 260);
     const fi = uiFocus >= 0 ? uiFocus : !b ? focusIdx : -1;
     placeHL(hlFocus, fi); hlFocus.material.opacity = 0.2 + pulse * 0.3;
     placeHL(hlHover, hover !== fi ? hover : -1);
@@ -655,7 +658,8 @@ window.Scene3D = (() => {
   function loop() {
     requestAnimationFrame(loop);
     const t = performance.now();
-    animate(t);
+    vt += (lastReal ? t - lastReal : 0) * speed; lastReal = t;
+    animate(vt, t);
     controls.update();
     renderer.render(scene, camera);
     updateTag();

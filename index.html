@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>Monopoli Indonesia 3D</title>
   <!-- ?v= dinaikkan tiap rilis agar browser tidak memakai file lama dari cache -->
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <canvas id="c"></canvas>
@@ -17,6 +17,9 @@
       <button id="infoRoom" class="chipbtn" hidden title="Salin link undangan"></button>
     </div>
     <div class="tbtns">
+      <div id="speedSeg" title="Kecepatan animasi & bot">
+        <span>⏩</span><button data-s="1">1x</button><button data-s="2">2x</button><button data-s="3">3x</button><button data-s="5">5x</button>
+      </div>
       <button id="btnWallet" title="Dompet & aset" hidden>💼</button>
       <button id="btnCam" title="Reset kamera">🎥</button>
       <button id="btnLog" title="Log & chat">📜</button>
@@ -123,8 +126,8 @@
           <label>Lelang jika tidak dibeli
             <select id="optAuction"><option value="1" selected>Ya</option><option value="0">Tidak</option></select>
           </label>
-          <label class="botOnly">Kecepatan bot
-            <select id="optSpeed"><option value="1" selected>Normal</option><option value="2">Cepat</option></select>
+          <label>Kecepatan animasi
+            <select id="optSpeed"><option value="1" selected>1x (normal)</option><option value="2">2x</option><option value="3">3x</option><option value="5">5x</option></select>
           </label>
           <label class="onlineOnly" hidden>Waktu giliran
             <select id="optTurn"><option value="20">20 detik</option><option value="30" selected>30 detik</option><option value="45">45 detik</option><option value="60">60 detik</option></select>
@@ -163,9 +166,9 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-  <script src="firebase-config.js?v=4"></script>
-  <script src="engine.js?v=4"></script>
-  <script src="scene.js?v=4"></script>
-  <script src="game.js?v=4"></script>
+  <script src="firebase-config.js?v=5"></script>
+  <script src="engine.js?v=5"></script>
+  <script src="scene.js?v=5"></script>
+  <script src="game.js?v=5"></script>
 </body>
 </html>
