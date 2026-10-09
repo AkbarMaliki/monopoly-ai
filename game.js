@@ -141,11 +141,11 @@
       hk.seq = g.seq; hk.start = animUntil;
       hk.delay = (g.step === 'auction' ? 450 + Math.random() * 500 : g.trade ? 1400 : 600 + Math.random() * 700) * (watchBots ? 0.35 : 1);
       let dl = 0;
-      if (!p.bot && g.cfg.turn) dl = hk.start + (g.step === 'auction' ? Math.min(15, g.cfg.turn) : g.cfg.turn) * 1000;
+      if (!p.bot && !p.ai && g.cfg.turn) dl = hk.start + (g.step === 'auction' ? Math.min(15, g.cfg.turn) : g.cfg.turn) * 1000;
       if ((g.deadline || 0) !== dl) { g.deadline = dl; commit(); return; }
     }
     if (hk.anim > 0) return;
-    if (p.bot) {
+    if (p.bot || p.ai) {
       if ((t - hk.start) * spd < hk.delay) return;
       const d = E.botDecide(g, w);
       if (!d || E.act(g, w, d.t, d.d)) forceAct(w);
@@ -167,6 +167,24 @@
     g.v++;
     if (mode === 'online' && isHost) publish();
     render();
+  }
+  /** Host: nyalakan/matikan autopilot pemain i. */
+  function applyAuto(i, on) {
+    const p = g.players[i];
+    if (!p || p.bot || p.out || g.phase !== 'play' || !!p.ai === on) return;
+    p.ai = on;
+    // ambil alih di tengah langkah milik AI (tanpa batas waktu): hitung ulang batas waktunya
+    if (!on && hk && E.whoActs(g) === i && !g.deadline) hk.seq = -1;
+    commit();
+  }
+  /** Tombol 🤖 AI: serahkan giliranku ke AI, atau ambil alih lagi. */
+  function setAuto(on) {
+    const v = currentView();
+    const me = v && myIdx >= 0 ? v.players[myIdx] : null;
+    if (!me || me.out || v.phase !== 'play' || !!me.ai === on) return;
+    if (authoritative()) applyAuto(myIdx, on);
+    else Net.ref.child('act').push({ u: myId, t: 'ai', d: { on } }).catch(permError);
+    toast(on ? '🤖 AI mengambil alih giliranmu' : '✋ Kamu kembali mengendalikan giliranmu');
   }
   function startTicker() { if (!tickTimer) tickTimer = setInterval(hostTick, 120); }
   function stopTicker() { clearInterval(tickTimer); tickTimer = null; }
@@ -323,6 +341,7 @@
     if (!a || !authoritative()) return;
     const i = g.players.findIndex(p => p && p.id === a.u);
     if (i < 0) return;
+    if (a.t === 'ai') { applyAuto(i, !!(a.d && a.d.on)); return; }
     if (!MANAGE.includes(a.t) && a.q !== g.seq) return;
     if (!E.act(g, i, a.t, a.d || {})) commit();
   }
@@ -479,6 +498,7 @@
     if (pendingSeq >= 0 && (pendingSeq !== v.seq || Date.now() - pendingAt > 3500)) pendingSeq = -1;
     Scene3D.update(v);
     renderSpeed(v);
+    renderAuto(v);
     renderPlayers(v);
     renderWallet(v);
     renderStatus(v);
@@ -522,6 +542,7 @@
       const tags = [
         p.bot ? `<span class="tg bot" title="Bot ${LEVEL_NAME[p.bot]}">${LEVEL_NAME[p.bot].toUpperCase()}</span>` : '',
         mode === 'online' && p.id === Net.host ? '<span class="tg host">HOST</span>' : '',
+        p.ai && !p.out ? '<span class="tg ai" title="Giliran dimainkan AI">🤖 AUTO</span>' : '',
         p.away && !p.out ? '<span class="tg off">OFFLINE</span>' : '',
         p.jail && !p.out ? `<span class="tg jail" title="Sisa giliran di penjara">🔒 PENJARA ${Math.max(1, E.JAIL_TURNS + 1 - p.jail)}×</span>` : '',
         p.jc && p.jc.length ? `<span class="tg card" title="Kartu Bebas dari Penjara">🗝 BEBAS${p.jc.length > 1 ? ' ×' + p.jc.length : ''}</span>` : '',
@@ -662,6 +683,11 @@
       <div class="mdB"><span>${icon}</span><small>Harga</small><b>${money(T.p)}</b></div></div>`;
   }
   const TOOLS = '<div class="aTools">' + btn('assets', ic('🏠') + '<span>Aset</span><kbd>A</kbd>', 'tool') + btn('trade', ic('🤝') + '<span>Tukar</span>', 'tool') + '</div>';
+  /** Panel saat autopilot aktif: AI yang memutuskan, pemain bisa ambil alih kapan saja. */
+  function aiBox(doing) {
+    return `<div class="aiBox"><span class="aiBot">🤖</span><div><b>AI bermain untukmu</b><small>${doing}<span class="dots"><i></i><i></i><i></i></span></small></div></div>
+      <div class="aBtns">${btn('aioff', `${ic('✋')}<span class="bl"><b>Ambil Alih</b><small>kendalikan giliranmu sendiri lagi</small></span>`, 'blue')}</div>`;
+  }
   function actionsHTML(v) {
     if (v.phase !== 'play') return '';
     const me = myIdx >= 0 ? v.players[myIdx] : null;
@@ -673,7 +699,7 @@
         const side = (ps, c) => (ps.length ? ps.map(tileChip).join(' ') : '') + (c ? ` <span class="tc money">${money(c)}</span>` : '') || '<span class="muted">—</span>';
         return `<div class="aHead">🤝 Tawaran tukar dari ${chip(v, tr.from)}</div>
           <div class="trView"><div><small>Kamu dapat</small><div>${side(tr.gp, tr.gc)}</div></div><div><small>Kamu berikan</small><div>${side(tr.tp, tr.tc)}</div></div></div>
-          <div class="aBtns">${btn('tradeok', ic('✔') + 'Terima', 'go', wait)}${btn('tradeno', ic('✕') + 'Tolak', 'no', wait)}</div>${timer}`;
+          ${me && me.ai ? aiBox('menimbang tawaran ini') : `<div class="aBtns">${btn('tradeok', ic('✔') + 'Terima', 'go', wait)}${btn('tradeno', ic('✕') + 'Tolak', 'no', wait)}</div>${timer}`}`;
       }
       if (tr.from === myIdx) return `<div class="aHead">⏳ Menunggu jawaban ${chip(v, tr.to)}<span class="dots"><i></i><i></i><i></i></span></div><div class="aBtns">${btn('tradecancel', ic('↩') + 'Batalkan tawaran', 'slate', wait)}</div>`;
       return '';
@@ -682,6 +708,13 @@
     if (v.step === 'auction' && v.auc) return auctionHTML(v, me, wait, timer);
     if (!me || me.out || v.turn !== myIdx) return '';
     const ribbon = sub => `<div class="aRibbon" style="--c:${PCOL[myIdx]}"><span><i></i>GILIRANMU</span><small>${sub}</small></div>`;
+    if (me.ai) {
+      const doing = v.step === 'buy' ? `menimbang membeli ${esc(TL[me.pos].n)}`
+        : v.step === 'debt' ? `mencari uang untuk membayar ${money(v.debt.a)}`
+        : v.step === 'end' ? 'mengatur aset & mengakhiri giliran'
+        : me.jail ? 'mencoba keluar dari penjara' : 'bersiap melempar dadu';
+      return `${ribbon('dimainkan AI')}${aiBox(doing)}${TOOLS}`;
+    }
     const isDirect = modeOf(v.cfg) === 'direct';
     // mode langsung bangun: upgrade kota milik sendiri tempat pion berhenti
     const upgrade = () => {
@@ -764,7 +797,8 @@
           <div class="aucPeople">${people}</div>
         </div>
       </div>`;
-    if (mine) {
+    if (mine && me.ai) h += `${aiBox('menimbang tawaran lelang')}</div>`;
+    else if (mine) {
       const min = a.bid + 1, max = me.cash, val = Math.min(a.bid + 10, max), can = max > a.bid;
       const plus = [10, 50, 100].map(x => `<button data-a="bidplus" data-v="${x}"${can ? '' : ' disabled'}>+${money(x)}</button>`).join('');
       h += `<div class="bidBox">
@@ -957,6 +991,14 @@
     if (shownSpd && s !== shownSpd && !can) toast(`⏩ Host mengubah kecepatan ke ${s}x`);
     shownSpd = s;
   }
+  function renderAuto(v) {
+    const me = myIdx >= 0 ? v.players[myIdx] : null, b = $('btnAuto');
+    b.hidden = !(v.phase === 'play' && me && !me.out);
+    if (b.hidden) return;
+    b.classList.toggle('on', !!me.ai);
+    b.textContent = me.ai ? '🤖 AI: ON' : '🤖 AI';
+    b.title = me.ai ? 'AI sedang memainkan giliranmu — klik untuk ambil alih (I)' : 'Serahkan giliranmu ke AI / autopilot (I)';
+  }
   function setSpeed(s) {
     if (!authoritative() || !SPEEDS.includes(s) || spdOf(g) === s) return;
     g.cfg.speed = s;
@@ -1050,7 +1092,7 @@
   function playSounds(v, p) {
     if (!p || v.phase !== 'play') return;
     const s = snap(v);
-    if (s.who === myIdx && myIdx >= 0 && p.who !== myIdx) Snd.ding();
+    if (s.who === myIdx && myIdx >= 0 && p.who !== myIdx && !v.players[myIdx].ai) Snd.ding();
     if (s.own > p.own) Snd.buy();
     if (s.hs > p.hs) Snd.build();
     if (s.jail.some((j, i) => j === 1 && !p.jail[i])) setTimeout(() => Snd.jail(), 700 / spdOf(v));
@@ -1141,6 +1183,7 @@
       const tc = e.target.closest('[data-tile]');
       if (!b) { if (tc) openModal('tile', +tc.dataset.tile); return; }
       const a = b.dataset.a;
+      if (a === 'aioff') return setAuto(false);
       if (a === 'assets') return openModal('assets');
       if (a === 'trade') return openModal('trade');
       if (a === 'bidplus' || a === 'bidset') {
@@ -1186,6 +1229,8 @@
       render();
     };
     $('btnWallet').onclick = () => { wallet.open = !wallet.open; render(); };
+    const toggleAuto = () => { const v = currentView(), me = v && myIdx >= 0 ? v.players[myIdx] : null; if (me) setAuto(!me.ai); };
+    $('btnAuto').onclick = toggleAuto;
 
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || !mode) return;
@@ -1194,6 +1239,7 @@
       else if (k === ' ' || k === 'enter') { if (!modal) { e.preventDefault(); primaryAction(); } }
       else if (k === 'b') { const b = document.querySelector('#actions [data-a="buy"]'); if (b && !b.disabled) b.click(); }
       else if (k === 'a') openModal('assets');
+      else if (k === 'i') toggleAuto();
     });
 
     $('chatForm').addEventListener('submit', e => { e.preventDefault(); sendChat($('chatIn').value); $('chatIn').value = ''; });

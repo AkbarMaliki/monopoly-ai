@@ -46,7 +46,10 @@ Pilih **mode permainan** di menu (berlaku untuk lawan bot maupun room online):
 - **⏩ Kecepatan 1x / 2x / 3x / 5x** (kanan atas, bisa diganti kapan saja): mempercepat lemparan dadu, langkah pion, kartu,
   animasi bangunan, dan jeda berpikir bot. Online: hanya host yang bisa mengubah, berlaku untuk semua pemain (`cfg.speed`).
   Di layar sempit hanya tombol aktif yang tampil — ketuk untuk ganti ke kecepatan berikutnya.
-  Keyboard: **Spasi** = lempar dadu / akhiri giliran, **B** = beli, **A** = aset, **Esc** = tutup jendela.
+- **🤖 AI / autopilot** (kanan atas): giliranmu dimainkan otomatis oleh AI (logika bot level Sedang) — lempar dadu, beli,
+  lelang, bangun rumah, gadai saat utang, menjawab tawaran tukar. Tekan lagi atau **✋ Ambil Alih** untuk main sendiri.
+  Online: pemain lain melihat tag 🤖 AUTO di kartumu; tidak ada timer giliran selama autopilot aktif. Mati otomatis saat game baru.
+- Keyboard: **Spasi** = lempar dadu / akhiri giliran, **B** = beli, **A** = aset, **I** = AI on/off, **Esc** = tutup jendela.
 
 ## Aturan yang diterapkan
 

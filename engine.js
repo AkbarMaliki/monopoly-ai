@@ -153,13 +153,14 @@
     g.players[i] = {
       id: p.id, name: String(p.name || 'Pemain').slice(0, 16), bot: p.bot | 0,
       pos: 0, cash: g.cfg.cash, jail: 0, jc: [], out: false, away: false, leave: false,
+      ai: false, // autopilot: pemain manusia yang gilirannya dimainkan bot (botDecide)
     };
     return g.players[i];
   }
   function clearBoard(g) {
     g.own = new Array(40).fill(-1); g.hs = new Array(40).fill(0); g.mg = new Array(40).fill(0);
     Object.assign(g, { at: -1, bt: -1, step: 'roll', round: 0, dbl: 0, again: false, mv: [], mvq: -1, card: null, auc: null, debt: null, trade: null, tt: 0, tmem: {}, winner: -1, rank: null });
-    g.players.forEach(p => { if (p) Object.assign(p, { pos: 0, cash: g.cfg.cash, jail: 0, jc: [], out: false }); });
+    g.players.forEach(p => { if (p) Object.assign(p, { pos: 0, cash: g.cfg.cash, jail: 0, jc: [], out: false, ai: false }); });
   }
   function startGame(g) {
     const ids = range(6).filter(i => g.players[i]);

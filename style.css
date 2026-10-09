@@ -89,6 +89,9 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 #speedSeg button { background: transparent; padding: 4px 7px; font-size: 12px; font-weight: 700; border-radius: 7px; opacity: .6; }
 #speedSeg button:hover:not(:disabled):not(.on) { opacity: 1; background: rgba(255, 255, 255, .08); }
 #speedSeg button.on { opacity: 1; background: var(--gold); color: #1b1b1b; }
+#btnAuto.on { background: linear-gradient(90deg, #2f7de1, #7a5cff); border-color: rgba(170, 190, 255, .6); color: #fff; font-weight: 700;
+  animation: aiGlow 1.8s ease-in-out infinite; }
+@keyframes aiGlow { 0%, 100% { box-shadow: 0 0 14px rgba(110, 140, 255, .6); } 50% { box-shadow: 0 0 4px rgba(110, 140, 255, .25); } }
 #speedSeg.ro button:disabled { cursor: default; }
 #speedSeg.ro button.on { opacity: .85; }
 
@@ -138,6 +141,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 .tg.off { background: rgba(229, 72, 77, .25); color: #ff9a9a; }
 .tg.jail { background: rgba(243, 144, 33, .25); color: #ffc27a; }
 .tg.bot { background: rgba(120, 190, 255, .15); color: #9cc3ff; }
+.tg.ai { background: rgba(122, 92, 255, .28); color: #c9bcff; }
 .pTurn { position: absolute; top: 6px; right: -1px; font: 900 7.5px/1 system-ui, sans-serif; letter-spacing: .8px; color: #1b1405;
   background: linear-gradient(90deg, #ffe08a, #f0b429); padding: 3px 6px 3px 7px; border-radius: 6px 0 0 6px; box-shadow: 0 2px 6px rgba(0, 0, 0, .4); }
 .pTurn.act { background: linear-gradient(90deg, #b7dcff, #6fb3ff); color: #0b1a2e; }
@@ -260,6 +264,13 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
   background: linear-gradient(90deg, #ffe08a, #f0b429); padding: 4px 9px; border-radius: 999px; box-shadow: 0 2px 6px rgba(240, 180, 41, .35); }
 .aRibbon span i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1.5px #fff; }
 .aRibbon small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* panel autopilot AI */
+.aiBox { display: flex; gap: 12px; align-items: center; }
+.aiBox b { display: block; }
+.aiBox small { color: var(--muted); font-size: 12px; }
+.aiBot { font-size: 30px; line-height: 1; animation: aiBob 1.4s ease-in-out infinite; }
+@keyframes aiBob { 50% { transform: translateY(-3px) rotate(-6deg); } }
 
 /* panel beli / utang / penjara */
 .buyBox, .debtBox, .jailBox { display: flex; gap: 12px; align-items: center; }
