@@ -86,6 +86,14 @@
     { m: 'Kena tilang. Bayar Rp 150rb.', x: 'cash', a: -15 },
     { m: 'Terpilih jadi Ketua RT. Bayar Rp 500rb ke setiap pemain.', x: 'each', a: 50 },
     { m: 'Usaha kuliner laris manis! Terima Rp 1,5jt.', x: 'cash', a: 150 },
+    { m: 'Tiket pesawat gratis! Terbang ke petak mana saja, atau tetap di sini. Jika melewati MULAI, terima Rp 2jt.', x: 'fly', c: 0 },
+    { m: 'Promo maskapai: bayar Rp 1jt untuk terbang ke petak mana saja, atau tolak. Jika melewati MULAI, terima Rp 2jt.', x: 'fly', c: 100 },
+    { m: 'Dapat tumpangan ojek online. Maju 5 langkah.', x: 'fwd', n: 5 },
+    { m: 'Semangat pagi! Lempar dadu sekali lagi.', x: 'again' },
+    { m: 'Investor berburu lahan: maju ke properti terdekat yang belum dimiliki siapa pun.', x: 'open' },
+    { m: 'Pajak kekayaan: bayar 10% dari uang tunaimu.', x: 'pct', a: -10 },
+    { m: 'Banjir bandang! 1 bangunan di kota termahalmu rusak tanpa ganti rugi.', x: 'quake' },
+    { m: 'Sedekah Jumat: beri Rp 500rb ke pemain paling miskin.', x: 'poor', a: 50 },
   ];
   const CHEST = [
     { m: 'Maju ke MULAI. Terima Rp 2jt.', x: 'move', to: 0 },
@@ -104,11 +112,18 @@
     { m: 'Perbaikan jalan kampung: bayar Rp 400rb per rumah dan Rp 1,15jt per hotel.', x: 'repair', h: 40, o: 115 },
     { m: 'Juara 2 lomba panjat pinang 17-an. Terima Rp 100rb.', x: 'cash', a: 10 },
     { m: 'Dapat warisan. Terima Rp 1jt.', x: 'cash', a: 100 },
+    { m: 'Menang undian tiket mudik! Terbang gratis ke petak mana saja, atau tetap di sini. Jika melewati MULAI, terima Rp 2jt.', x: 'fly', c: 0 },
+    { m: 'Bunga deposito cair: terima 5% dari uang tunaimu.', x: 'pct', a: 5 },
+    { m: 'Bayar PBB: Rp 100rb per properti yang kamu miliki.', x: 'perprop', a: 10 },
+    { m: 'Asuransi usaha: Bebas Sewa 1×. Simpan kartu ini — otomatis dipakai saat kamu harus membayar sewa.', x: 'shield' },
+    { m: 'Arisan keluarga: pemain terkaya memberimu Rp 500rb.', x: 'rich', a: 50 },
+    { m: 'Subsidi renovasi: terima Rp 250rb per rumah dan Rp 1jt per hotel.', x: 'grant', h: 25, o: 100 },
   ];
+  const KEEP = { free: 1, shield: 1 }; // kartu yang disimpan pemain (keluar dari tumpukan sampai dipakai)
   const DECK_NAME = { chance: 'Kesempatan', chest: 'Dana Umum' };
 
   // durasi animasi (ms) — dipakai scene dan host agar sinkron
-  const ANIM = { dice: 1100, step: 170, seg: 250, jump: 750, card: 2300 };
+  const ANIM = { dice: 1100, step: 170, seg: 250, jump: 750, card: 2300, fly: 1400 };
 
   // ---------- util ----------
   function money(n) {
@@ -145,6 +160,7 @@
       own: new Array(40).fill(-1), hs: new Array(40).fill(0), mg: new Array(40).fill(0),
       turn: 0, step: 'roll', round: 0, dice: [3, 4], rid: 0, dbl: 0, again: false,
       mv: [], mid: 0, mvq: -1, card: null, cid: 0,
+      fly: null, // kartu pesawat aktif selama step 'fly': { c: harga tiket }
       auc: null, debt: null, trade: null, tid: 0, tt: 0, tmem: {},
       decks: { chance: [], chest: [] }, log: [], lc: 0, winner: -1, rank: null,
     };
@@ -152,15 +168,15 @@
   function addPlayer(g, i, p) {
     g.players[i] = {
       id: p.id, name: String(p.name || 'Pemain').slice(0, 16), bot: p.bot | 0,
-      pos: 0, cash: g.cfg.cash, jail: 0, jc: [], out: false, away: false, leave: false,
+      pos: 0, cash: g.cfg.cash, jail: 0, jc: [], sc: [], out: false, // jc: kartu bebas penjara, sc: kartu bebas sewa away: false, leave: false,
       ai: false, // autopilot: pemain manusia yang gilirannya dimainkan bot (botDecide)
     };
     return g.players[i];
   }
   function clearBoard(g) {
     g.own = new Array(40).fill(-1); g.hs = new Array(40).fill(0); g.mg = new Array(40).fill(0);
-    Object.assign(g, { at: -1, bt: -1, step: 'roll', round: 0, dbl: 0, again: false, mv: [], mvq: -1, card: null, auc: null, debt: null, trade: null, tt: 0, tmem: {}, winner: -1, rank: null });
-    g.players.forEach(p => { if (p) Object.assign(p, { pos: 0, cash: g.cfg.cash, jail: 0, jc: [], out: false, ai: false }); });
+    Object.assign(g, { at: -1, bt: -1, step: 'roll', round: 0, dbl: 0, again: false, mv: [], mvq: -1, card: null, fly: null, auc: null, debt: null, trade: null, tt: 0, tmem: {}, winner: -1, rank: null });
+    g.players.forEach(p => { if (p) Object.assign(p, { pos: 0, cash: g.cfg.cash, jail: 0, jc: [], sc: [], out: false, ai: false }); });
   }
   function startGame(g) {
     const ids = range(6).filter(i => g.players[i]);
@@ -326,6 +342,14 @@
     land(g, i, o);
   }
   function moveTo(g, i, to, o) { move(g, i, (to - g.players[i].pos + 40) % 40, o); }
+  /** Kartu pesawat: pion terbang langsung ke petak tujuan (selalu arah maju — lewat MULAI tetap dapat gaji). */
+  function flyTo(g, i, to) {
+    const p = g.players[i], from = p.pos;
+    addMv(g, { p: i, f: from, t: to, fl: 1 });
+    p.pos = to;
+    if (to < from) { p.cash += GO_SALARY; log(g, `${p.name} melewati MULAI, terima ${money(GO_SALARY)}`); }
+    land(g, i);
+  }
   function land(g, i, o) {
     o = o || {};
     const p = g.players[i], t = p.pos, T = TILES[t];
@@ -336,6 +360,12 @@
         if (ow < 0) { g.step = 'buy'; return; }
         if (ow === i) return finish(g);
         if (g.mg[t]) { log(g, `${T.n} sedang digadaikan — ${p.name} tidak bayar sewa`); return finish(g); }
+        if (p.sc && p.sc.length) {
+          const [dk, k] = p.sc.shift().split(':');
+          g.decks[dk].push(+k);
+          log(g, `🛡️ ${p.name} memakai kartu Bebas Sewa di ${T.n}`);
+          return finish(g);
+        }
         const sum = g.dice[0] + g.dice[1];
         let r = o.u10 ? sum * 10 : rent(g, t, sum);
         if (o.x2) r *= 2;
@@ -352,10 +382,11 @@
   }
   function drawCard(g, i, deck) {
     const p = g.players[i], d = g.decks[deck];
-    if (!d.length) g.decks[deck] = shuffle(range((deck === 'chance' ? CHANCE : CHEST).length).filter(k => !g.players.some(q => q && q.jc.includes(deck + ':' + k))));
+    const held = c => g.players.some(q => q && (q.jc.includes(c) || (q.sc || []).includes(c)));
+    if (!d.length) g.decks[deck] = shuffle(range((deck === 'chance' ? CHANCE : CHEST).length).filter(k => !held(deck + ':' + k)));
     const ci = g.decks[deck].shift();
     const C = (deck === 'chance' ? CHANCE : CHEST)[ci];
-    if (C.x !== 'free') g.decks[deck].push(ci);
+    if (!KEEP[C.x]) g.decks[deck].push(ci);
     g.card = { d: deck, i: ci, p: i, id: ++g.cid };
     addMv(g, { p: i, w: 1 });
     log(g, `${p.name} — ${DECK_NAME[deck]}: ${C.m}`);
@@ -387,6 +418,54 @@
         return finish(g);
       }
       case 'free': p.jc.push(deck + ':' + ci); return finish(g);
+      case 'shield': (p.sc = p.sc || []).push(deck + ':' + ci); return finish(g);
+      case 'fly': g.fly = { c: C.c | 0 }; g.step = 'fly'; return;
+      case 'fwd': return move(g, i, C.n);
+      case 'again': g.again = true; return finish(g);
+      case 'open': {
+        let t = -1;
+        for (let k = 1; k < 40 && t < 0; k++) { const x = (p.pos + k) % 40; if (isOwnable(x) && g.own[x] < 0) t = x; }
+        if (t < 0) { log(g, 'Semua properti sudah dimiliki — tidak ke mana-mana'); return finish(g); }
+        return moveTo(g, i, t);
+      }
+      case 'pct': {
+        const amt = Math.round(Math.max(0, p.cash) * Math.abs(C.a) / 100);
+        log(g, `${p.name} ${C.a > 0 ? 'menerima' : 'membayar'} ${money(amt)}`);
+        if (C.a > 0) { p.cash += amt; return finish(g); }
+        return pay(g, i, amt, -1);
+      }
+      case 'perprop': {
+        const n = range(40).filter(t => g.own[t] === i).length;
+        if (n) log(g, `${p.name} membayar PBB ${n} properti: ${money(n * C.a)}`);
+        return pay(g, i, n * C.a, -1);
+      }
+      case 'grant': {
+        let amt = 0;
+        for (let t = 0; t < 40; t++) if (g.own[t] === i && g.hs[t]) amt += g.hs[t] === 5 ? C.o : g.hs[t] * C.h;
+        if (amt) { p.cash += amt; log(g, `${p.name} menerima subsidi ${money(amt)}`); }
+        return finish(g);
+      }
+      case 'quake': {
+        // bangunan yang boleh dijual (tetap merata) di kota termahal
+        let best = -1;
+        for (let t = 0; t < 40; t++) if (!canSell(g, i, t) && (best < 0 || TILES[t].p > TILES[best].p)) best = t;
+        if (best < 0) { log(g, `${p.name} tidak punya bangunan — aman dari banjir`); return finish(g); }
+        const hotel = g.hs[best] === 5;
+        g.hs[best] = hotel ? Math.min(4, housesLeft(g)) : g.hs[best] - 1;
+        log(g, `🌊 ${hotel ? 'Hotel' : '1 rumah'} di ${TILES[best].n} rusak`);
+        return finish(g);
+      }
+      case 'poor': case 'rich': {
+        const o = others(g, i);
+        if (!o.length) return finish(g);
+        const j = C.x === 'poor' ? o.reduce((a, b) => (g.players[b].cash < g.players[a].cash ? b : a))
+          : o.reduce((a, b) => (worth(g, b) > worth(g, a) ? b : a));
+        if (C.x === 'poor') { log(g, `${p.name} memberi ${money(C.a)} ke ${nm(g, j)}`); return pay(g, i, C.a, j); }
+        const x = Math.min(g.players[j].cash, C.a);
+        g.players[j].cash -= x; p.cash += x;
+        log(g, `${nm(g, j)} memberi ${money(x)} ke ${p.name}`);
+        return finish(g);
+      }
     }
     return finish(g);
   }
@@ -495,9 +574,10 @@
       if (g.own[t] !== i) continue;
       if (cred) g.own[t] = to; else { g.own[t] = -1; g.mg[t] = 0; }
     }
-    if (cred) { cred.cash += Math.max(0, p.cash); cred.jc.push(...p.jc); }
-    else p.jc.forEach(c => { const [d, k] = c.split(':'); g.decks[d].push(+k); });
-    p.cash = 0; p.jc = []; p.jail = 0; p.out = true;
+    const sc = p.sc || [];
+    if (cred) { cred.cash += Math.max(0, p.cash); cred.jc.push(...p.jc); (cred.sc = cred.sc || []).push(...sc); }
+    else p.jc.concat(sc).forEach(c => { const [d, k] = c.split(':'); g.decks[d].push(+k); });
+    p.cash = 0; p.jc = []; p.sc = []; p.jail = 0; p.out = true;
     log(g, `💥 ${p.name} BANGKRUT!${cred ? ` Semua aset diambil ${cred.name}.` : ''}`);
     if (g.debt && g.debt.p === i) g.debt = null;
     if (g.trade && (g.trade.from === i || g.trade.to === i)) g.trade = null;
@@ -611,6 +691,20 @@
         }
         break;
       }
+      case 'fly': {
+        const c = g.fly ? g.fly.c : 0;
+        if (t === 'fly') {
+          const to = Math.floor(+d.t);
+          if (!(to >= 0 && to < 40) || to === p.pos) return 'Pilih petak tujuan lain';
+          if (p.cash < c) return 'Uang tidak cukup untuk membeli tiket';
+          g.fly = null; p.cash -= c;
+          log(g, `✈️ ${p.name} terbang ke ${TILES[to].n}${c ? ` (tiket ${money(c)})` : ''}`);
+          flyTo(g, i, to);
+          return null;
+        }
+        if (t === 'nofly') { g.fly = null; log(g, `${p.name} memilih tidak terbang`); finish(g); return null; }
+        break;
+      }
       case 'debt': {
         const db = g.debt;
         if (t === 'pay') {
@@ -648,7 +742,7 @@
   }
   function animTime(mv, rolled) {
     let ms = rolled ? ANIM.dice : 0;
-    (mv || []).forEach(m => { ms += m.w ? ANIM.card : m.j ? ANIM.jump : m.n * ANIM.step + ANIM.seg; });
+    (mv || []).forEach(m => { ms += m.w ? ANIM.card : m.j ? ANIM.jump : m.fl ? ANIM.fly : m.n * ANIM.step + ANIM.seg; });
     return ms;
   }
 
@@ -771,6 +865,37 @@
     if (a.bid + 1 <= cap && a.bid + 10 <= cap) return { t: 'bid', d: { a: cap } };
     return { t: 'pass' };
   }
+  /** Nilai kasar mendarat di petak t lewat kartu pesawat (setelah membayar tiket c). */
+  function flyValue(g, i, t, c) {
+    const p = g.players[i], T = TILES[t], o = g.own[t];
+    const go = t < p.pos ? GO_SALARY : 0, cash = p.cash - c + go;
+    let v = go;
+    if (isOwnable(t)) {
+      if (o < 0) {
+        if (cash < T.p) return v - 10;
+        const gt = T.t === 'prop' ? GROUP_TILES[T.g] : T.t === 'rail' ? RAILS : UTILS;
+        const mine = gt.filter(x => g.own[x] === i).length;
+        const block = [...new Set(gt.map(x => g.own[x]).filter(x => x >= 0 && x !== i))].some(x => gt.filter(y => g.own[y] === x).length === gt.length - 1);
+        v += (cash - T.p >= reserveOf(g, i) ? 60 : 15) + (mine === gt.length - 1 ? 220 : block ? 120 : mine ? 50 : 0) + T.p * 0.1;
+      } else if (o === i) v += direct(g) && T.t === 'prop' && g.hs[t] < 5 && cash >= houseCost(t) ? 50 : 5;
+      else if (!(p.sc && p.sc.length)) v -= rent(g, t, 7);
+    } else if (T.t === 'tax') v -= T.a;
+    else if (T.t === 'gojail') v -= 150;
+    else if (T.t === 'chance' || T.t === 'chest') v += 15;
+    return v;
+  }
+  function botFly(g, i) {
+    const p = g.players[i], lvl = p.bot || 2, c = g.fly ? g.fly.c : 0;
+    let best = -1, bs = -Infinity;
+    for (let t = 0; t < 40; t++) {
+      if (t === p.pos) continue;
+      const s = flyValue(g, i, t, c) + (lvl === 1 ? (rnd() - 0.5) * 160 : 0);
+      if (s > bs) { bs = s; best = t; }
+    }
+    const res = c && lvl > 1 ? reserveOf(g, i) : 0;
+    if (best >= 0 && bs > (c ? c + 30 : 0) && p.cash - c >= res) return { t: 'fly', d: { t: best } };
+    return { t: 'nofly' };
+  }
   function botDecide(g, i) {
     const p = g.players[i];
     if (!p || p.out || g.phase !== 'play') return null;
@@ -794,6 +919,7 @@
       if (left >= reserveOf(g, i) || (key && left >= 0) || (lvl === 1 && rnd() < 0.85)) return { t: 'buy' };
       return { t: 'decline' };
     }
+    if (g.step === 'fly') return botFly(g, i);
     const m = botManage(g, i);
     if (m) return m;
     if (g.step === 'roll' || g.step === 'end') { const tr = botTrade(g, i); if (tr) return tr; }
@@ -816,6 +942,7 @@
     if (g.step === 'roll') return { t: 'roll' };
     if (g.step === 'buy') return { t: 'decline' };
     if (g.step === 'end') return { t: 'end' };
+    if (g.step === 'fly') return { t: 'nofly' };
     if (g.step === 'debt') return botDecide(g, i);
     return null;
   }

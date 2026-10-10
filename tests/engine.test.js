@@ -190,6 +190,81 @@ test('ke stasiun terdekat bayar 2×', () => {
   assert.strictEqual(g.players[0].pos, 15);
   assert.strictEqual(g.players[1].cash, 1550);
 });
+test('kartu pesawat: pilih tujuan, lewat MULAI, tiket berbayar, boleh menolak', () => {
+  const g = newGame(2);
+  g.decks.chance = [16];
+  g.players[0].pos = 3;
+  E.rng = diceSeq([[1, 3]]);
+  ok(g, 0, 'roll'); // 7 Kesempatan → tiket gratis
+  assert.strictEqual(g.step, 'fly');
+  assert(E.act(g, 0, 'fly', { t: 7 }), 'tidak boleh terbang ke petak sendiri');
+  assert(E.act(g, 0, 'roll'));
+  ok(g, 0, 'fly', { t: 1 }); // lewat MULAI → Jayapura
+  assert.strictEqual(g.players[0].pos, 1);
+  assert.strictEqual(g.players[0].cash, 1700);
+  assert.strictEqual(g.step, 'buy');
+  assert(g.mv.some(m => m.fl && m.t === 1));
+  assert.strictEqual(g.fly, null);
+
+  const h = newGame(2);
+  h.decks.chance = [17];
+  h.players[0].pos = 3; h.players[0].cash = 90;
+  E.rng = diceSeq([[1, 3]]);
+  ok(h, 0, 'roll'); // tiket Rp 1jt
+  assert.strictEqual(h.fly.c, 100);
+  assert(E.act(h, 0, 'fly', { t: 20 }), 'uang kurang untuk tiket');
+  ok(h, 0, 'nofly');
+  assert.strictEqual(h.step, 'end');
+  assert.strictEqual(h.players[0].pos, 7);
+  h.step = 'fly'; h.fly = { c: 100 }; h.players[0].cash = 500;
+  ok(h, 0, 'fly', { t: 20 }); // Bebas Parkir
+  assert.strictEqual(h.players[0].cash, 400);
+  assert.strictEqual(h.step, 'end');
+});
+test('bot memakai kartu pesawat untuk melengkapi warna', () => {
+  const g = newGame(2);
+  g.players[0].bot = 2;
+  g.own[37] = 0; g.players[0].pos = 7; g.step = 'fly'; g.fly = { c: 0 };
+  assert.deepStrictEqual(E.botDecide(g, 0), { t: 'fly', d: { t: 39 } });
+  g.fly = { c: 100 }; g.players[0].cash = 120;
+  assert.strictEqual(E.botDecide(g, 0).t, 'nofly');
+});
+test('kartu Bebas Sewa disimpan lalu otomatis dipakai', () => {
+  const g = newGame(2);
+  g.decks.chest = [19];
+  g.own[5] = 1;
+  E.rng = diceSeq([[1, 1], [1, 2]]);
+  ok(g, 0, 'roll'); // 2 Dana Umum
+  assert.deepStrictEqual(g.players[0].sc, ['chest:19']);
+  assert(!g.decks.chest.includes(19));
+  ok(g, 0, 'roll'); // kembar → lempar lagi, 5 Stasiun Gambir milik P1
+  assert.strictEqual(g.players[0].cash, 1500);
+  assert.strictEqual(g.players[1].cash, 1500);
+  assert.deepStrictEqual(g.players[0].sc, []);
+  assert(g.decks.chest.includes(19));
+});
+test('kartu banjir, pajak kekayaan, lempar lagi, maju ke properti kosong', () => {
+  const g = newGame(2);
+  g.own[37] = 0; g.own[39] = 0; g.hs[37] = 2; g.hs[39] = 2;
+  g.decks.chance = [22, 21, 19, 20];
+  g.players[0].pos = 33;
+  E.rng = diceSeq([[1, 2]]);
+  ok(g, 0, 'roll'); // 36 → banjir: rumah di Jakarta (termahal) rusak
+  assert.deepStrictEqual([g.hs[37], g.hs[39]], [2, 1]);
+  g.step = 'roll'; g.players[0].pos = 33;
+  E.rng = diceSeq([[1, 2]]);
+  ok(g, 0, 'roll'); // pajak kekayaan 10%
+  assert.strictEqual(g.players[0].cash, 1350);
+  g.step = 'roll'; g.players[0].pos = 33;
+  E.rng = diceSeq([[1, 2]]);
+  ok(g, 0, 'roll'); // lempar lagi
+  assert.strictEqual(g.step, 'roll');
+  g.players[0].pos = 33;
+  E.rng = diceSeq([[1, 2]]);
+  ok(g, 0, 'roll'); // maju ke properti kosong terdekat: 37/39 milik sendiri → lewat MULAI ke Jayapura
+  assert.strictEqual(g.players[0].pos, 1);
+  assert.strictEqual(g.step, 'buy');
+});
 
 console.log('Lelang');
 test('tolak beli → lelang, pemenang bayar', () => {
@@ -335,7 +410,7 @@ test('150 game bot mode langsung bangun selesai', () => {
 
 console.log('Simulasi bot');
 test('300 game bot selesai tanpa error & invariant terjaga', () => {
-  let ended = 0, turns = 0, trades = 0, auctions = 0, builds = 0;
+  let ended = 0, turns = 0, trades = 0, auctions = 0, builds = 0, flights = 0;
   for (let s = 1; s <= 300; s++) {
     E.rng = seeded(s * 7919);
     const n = 2 + (s % 5);
@@ -353,6 +428,7 @@ test('300 game bot selesai tanpa error & invariant terjaga', () => {
       if (d.t === 'tradeok') trades++;
       if (d.t === 'decline' && g.step === 'auction') auctions++;
       if (d.t === 'build') builds++;
+      if (d.t === 'fly') flights++;
       g.players.forEach((p, i) => {
         if (!p || p.out) return;
         assert(p.cash >= 0, 'uang negatif');
@@ -368,9 +444,9 @@ test('300 game bot selesai tanpa error & invariant terjaga', () => {
     }
     if (g.phase === 'over') ended++;
   }
-  console.log(`    ${ended}/300 selesai · ${turns} giliran · ${trades} tukar · ${auctions} lelang · ${builds} bangun`);
+  console.log(`    ${ended}/300 selesai · ${turns} giliran · ${trades} tukar · ${auctions} lelang · ${builds} bangun · ${flights} terbang`);
   assert(ended >= 280, 'terlalu banyak game tidak selesai');
-  assert(trades > 0 && builds > 0);
+  assert(trades > 0 && builds > 0 && flights > 0);
 });
 
 console.log(`\n${passed} test lulus.`);

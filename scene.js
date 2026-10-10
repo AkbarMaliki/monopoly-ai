@@ -565,6 +565,7 @@ window.Scene3D = (() => {
     if (m.w) { cur = { m, t0: t, dur: E.ANIM.card }; if (opts.onCard) opts.onCard(); return; }
     tk.moving = true;
     if (m.j) { cur = { m, t0: t, dur: E.ANIM.jump, from: tk.mesh.position.clone(), to: slotPos(10, m.p, true) }; return; }
+    if (m.fl) { tk.jail = false; cur = { m, t0: t, dur: E.ANIM.fly, from: tk.mesh.position.clone(), to: slotPos(m.t, m.p, false) }; return; }
     if (tk.tile !== m.f) { tk.tile = m.f; tk.jail = false; tk.mesh.position.copy(slotPos(m.f, m.p, false)); }
     tk.jail = false;
     cur = { m, t0: t, dur: m.n * E.ANIM.step + E.ANIM.seg, k: -1 };
@@ -578,6 +579,14 @@ window.Scene3D = (() => {
       tk.mesh.position.lerpVectors(cur.from, cur.to, s);
       tk.mesh.position.y = Math.sin(e * Math.PI) * 1.6;
       if (e >= 1) { tk.tile = 10; tk.jail = true; tk.moving = false; tk.target.copy(cur.to); cur = null; }
+      return;
+    }
+    if (m.fl) {
+      // terbang: naik tinggi, melayang melintasi papan, lalu mendarat
+      const e = Math.min(1, el / cur.dur), s = e * e * (3 - 2 * e);
+      tk.mesh.position.lerpVectors(cur.from, cur.to, s);
+      tk.mesh.position.y = Math.sin(e * Math.PI) * 3.2;
+      if (e >= 1) { tk.tile = m.t; tk.moving = false; tk.target.copy(cur.to); cur = null; }
       return;
     }
     const st = E.ANIM.step, k = Math.min(m.n, Math.floor(el / st));

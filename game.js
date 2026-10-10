@@ -33,6 +33,7 @@
   let isHost = false, myIdx = -1, tickTimer = null, hk = null;
   let pendingSeq = -1, pendingAt = 0, lastView = null, localCfg = null, watchBots = false, overShown = false, bustShown = false;
   let modal = null, shownCard = 0, pendingCard = null, cardTimer = 0, lastLog = -1;
+  let flyPick = -1; // petak tujuan pesawat yang sedang dipilih
   let wallet = { cash: null, owned: null, open: false };
 
   const playerName = () => (store.get('mn_name', '') || 'Pemain').slice(0, 16);
@@ -546,6 +547,7 @@
         p.away && !p.out ? '<span class="tg off">OFFLINE</span>' : '',
         p.jail && !p.out ? `<span class="tg jail" title="Sisa giliran di penjara">🔒 PENJARA ${Math.max(1, E.JAIL_TURNS + 1 - p.jail)}×</span>` : '',
         p.jc && p.jc.length ? `<span class="tg card" title="Kartu Bebas dari Penjara">🗝 BEBAS${p.jc.length > 1 ? ' ×' + p.jc.length : ''}</span>` : '',
+        p.sc && p.sc.length ? `<span class="tg card" title="Kartu Bebas Sewa">🛡 SEWA${p.sc.length > 1 ? ' ×' + p.sc.length : ''}</span>` : '',
       ].join('');
       const ini = p.name.trim().split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase() || '?';
       const turn = i === v.turn && v.phase === 'play' && !p.out, bidding = i === w && !turn && v.phase === 'play';
@@ -601,7 +603,7 @@
     for (let t = 0; t < 40; t++) if (v.own[t] === myIdx) owned.push(t);
     const fresh = wallet.owned ? owned.filter(t => !wallet.owned.includes(t)) : [];
     wallet.owned = owned;
-    $('wCount').textContent = (owned.length ? `(${owned.length})` : '') + (me.jc && me.jc.length ? ` · 🗝 ${me.jc.length} kartu` : '');
+    $('wCount').textContent = (owned.length ? `(${owned.length})` : '') + (me.jc && me.jc.length ? ` · 🗝 ${me.jc.length} kartu` : '') + (me.sc && me.sc.length ? ` · 🛡 ${me.sc.length}` : '');
     const groups = [];
     E.GROUPS.forEach((G, k) => { const ts = owned.filter(t => TL[t].t === 'prop' && TL[t].g === k); if (ts.length) groups.push({ ts, col: G.c, full: E.hasMonopoly(v, myIdx, k) }); });
     const rs = owned.filter(t => TL[t].t === 'rail'), us = owned.filter(t => TL[t].t === 'util');
@@ -624,7 +626,9 @@
       return `<div class="jcard ${d}${usable ? ' use' : ''}" data-jc="1" title="${usable ? 'Klik untuk memakai kartu ini' : 'Dipakai saat kamu masuk penjara'}">
         <div class="jh">${d === 'chance' ? 'KESEMPATAN' : 'DANA UMUM'}</div><div class="jb"><span>🗝️</span><b>BEBAS DARI PENJARA</b></div>
         <div class="jf">${usable ? 'KLIK PAKAI' : 'simpan'}</div></div>`;
-    }).join('');
+    }).join('') + (me.sc || []).map(c => `<div class="jcard ${c.split(':')[0]}" data-sc="1" title="Otomatis dipakai saat kamu harus membayar sewa">
+        <div class="jh">${c.startsWith('chance') ? 'KESEMPATAN' : 'DANA UMUM'}</div><div class="jb"><span>🛡️</span><b>BEBAS SEWA</b></div>
+        <div class="jf">otomatis</div></div>`).join('');
     const dh = (jcs ? `<div class="dgrp jcs">${jcs}</div>` : '') + (groups.length ? groups.map(G => `<div class="dgrp${G.full ? ' full' : ''}">${G.ts.map(deed).join('')}</div>`).join('')
       : '<div class="muted small">Belum punya properti. Beli kota saat berhenti di petaknya!</div>');
     if ($('wDeeds').dataset.h !== dh) { $('wDeeds').dataset.h = dh; $('wDeeds').innerHTML = dh; }
@@ -641,6 +645,7 @@
     else if (busy) sub = '…';
     else if (v.step === 'buy') sub = `Memutuskan membeli ${esc(TL[v.players[v.turn].pos].n)}`;
     else if (v.step === 'debt') sub = `Kekurangan uang: harus bayar ${money(v.debt.a)}`;
+    else if (v.step === 'fly') sub = '✈️ Memilih tujuan penerbangan';
     else if (v.step === 'roll') sub = v.players[v.turn].jail ? 'Di penjara' : v.again ? 'Dadu kembar, lempar lagi!' : 'Melempar dadu';
     else if (v.step === 'end') sub = 'Selesai bergerak';
     const html = `<div class="st1"><span class="dice">${DICE[v.dice[0]]}${DICE[v.dice[1]]}</span> Giliran ${chip(v, v.turn)}
@@ -649,6 +654,7 @@
   }
 
   function renderActions(v) {
+    if (flyPick >= 0 && !flyMode(v)) { flyPick = -1; if (!modal) Scene3D.highlight(-1); }
     const el = $('actions');
     const html = actionsHTML(v);
     el.hidden = !html;
@@ -711,6 +717,7 @@
     if (me.ai) {
       const doing = v.step === 'buy' ? `menimbang membeli ${esc(TL[me.pos].n)}`
         : v.step === 'debt' ? `mencari uang untuk membayar ${money(v.debt.a)}`
+        : v.step === 'fly' ? 'memilih tujuan penerbangan'
         : v.step === 'end' ? 'mengatur aset & mengakhiri giliran'
         : me.jail ? 'mencoba keluar dari penjara' : 'bersiap melempar dadu';
       return `${ribbon('dimainkan AI')}${aiBox(doing)}${TOOLS}`;
@@ -763,6 +770,17 @@
           })() : ''}
           ${can ? '' : `<div class="aInfo warn">Uangmu ${money(me.cash)} — kurang ${money(T.p - me.cash)}. Gadaikan aset lewat 🏠 Aset, atau lelang.</div>`}${TOOLS}${timer}`;
       }
+      case 'fly': {
+        const c = v.fly ? v.fly.c : 0, t = flyPick, can = t >= 0 && me.cash >= c;
+        const opts = TL.map((T, k) => (k === me.pos ? '' : `<option value="${k}"${k === t ? ' selected' : ''}>${k}. ${esc(T.n)} — ${esc(flyInfo(v, k))}</option>`)).join('');
+        const dest = t < 0 ? '<div class="aInfo">Klik petak di papan, atau pilih dari daftar di bawah.</div>'
+          : `<div class="buyBox">${E.isOwnable(t) ? miniDeed(t) : `<span class="flyIc">${TILE_IC[TL[t].t] || '📍'}</span>`}<div class="buyInfo"><small>Tujuan</small><b>${esc(TL[t].n)}</b>
+              <div class="bRent">${esc(flyInfo(v, t))}</div>${t < me.pos ? `<div class="bHint gold">Lewat MULAI: +${money(E.GO_SALARY)}</div>` : ''}</div></div>`;
+        return `<div class="aHead">✈️ Kartu pesawat${c ? ` · tiket ${money(c)}` : ' · gratis'}</div>${dest}
+          <select id="flySel"><option value="-1">— pilih petak tujuan —</option>${opts}</select>
+          <div class="aBtns">${btn('fly', `${ic('✈️')}<span class="bl"><b>Terbang${c ? ' ' + money(c) : ''}</b><small>${t >= 0 ? 'ke ' + esc(TL[t].n) : 'pilih tujuan dulu'}</small></span>`, 'go', wait || !can, t >= 0 && !can ? 'Uang tidak cukup untuk tiket' : '')}
+            ${btn('nofly', `${ic('🏠')}<span class="bl"><b>Tetap di sini</b><small>tidak terbang</small></span>`, 'warm', wait)}</div>${TOOLS}${timer}`;
+      }
       case 'debt': {
         const d = v.debt, to = d.to >= 0 ? chip(v, d.to) : d.to === -2 ? 'semua pemain' : 'Bank';
         const short = Math.max(0, d.a - me.cash);
@@ -813,6 +831,28 @@
     }
     return h;
   }
+  const TILE_IC = { go: '🏁', jail: '🔒', park: '🅿️', gojail: '🚔', tax: '🧾', chance: '❓', chest: '💰' };
+  /** Ringkasan apa yang terjadi kalau pemain ini mendarat di petak t (untuk memilih tujuan pesawat). */
+  function flyInfo(v, t) {
+    const T = TL[t], o = v.own[t], me = v.players[myIdx];
+    if (E.isOwnable(t)) {
+      if (o < 0) return `dijual ${money(T.p)}`;
+      if (o === myIdx) return 'milikmu';
+      if (v.mg[t]) return `milik ${pname(v, o)} · digadaikan, bebas sewa`;
+      return `milik ${pname(v, o)} · ${me.sc && me.sc.length ? 'kartu Bebas Sewa terpakai' : `sewa ${money(E.rent(v, t, 7))}`}`;
+    }
+    return { go: `terima ${money(E.GO_SALARY)}`, jail: 'hanya mampir', park: 'istirahat', gojail: 'langsung masuk penjara!', tax: `bayar ${money(T.a)}`,
+      chance: 'ambil kartu Kesempatan', chest: 'ambil kartu Dana Umum' }[T.t] || '';
+  }
+  function pickFly(t) {
+    const v = currentView();
+    if (!v || t === v.players[myIdx].pos) { toast('Pilih petak selain tempatmu sekarang.'); return; }
+    flyPick = t;
+    Scene3D.highlight(t);
+    render();
+  }
+  /** Sedang giliranku memilih tujuan pesawat (bukan autopilot). */
+  const flyMode = v => !!v && v.phase === 'play' && v.step === 'fly' && v.turn === myIdx && myIdx >= 0 && !v.players[myIdx].ai && !v.trade;
   function rentLine(t) {
     const T = TL[t];
     if (T.t === 'prop') return `Sewa ${money(T.r[0])} · monopoli ${money(T.r[0] * 2)} · hotel ${money(T.r[5])}`;
@@ -937,6 +977,7 @@
     return `<div class="tHead" style="background:${PCOL[i]}"><small>${mine ? 'Aset kamu' : 'Aset pemain'}</small><h3>${esc(p.name)}</h3></div>
       <div class="tBody"><div class="kv"><span>Uang</span><b>${money(p.cash)}</b></div><div class="kv"><span>Total kekayaan</span><b>${money(E.worth(v, i))}</b></div>
       ${p.jc && p.jc.length ? `<div class="kv"><span>Kartu bebas penjara</span><b>${p.jc.length}</b></div>` : ''}
+      ${p.sc && p.sc.length ? `<div class="kv"><span>Kartu bebas sewa</span><b>${p.sc.length}</b></div>` : ''}
       ${rows || '<p class="muted">Belum punya properti.</p>'}
       ${mine ? `<p class="muted small">${modeOf(v.cfg) === 'direct' ? 'Mode Langsung Bangun: upgrade 1 tingkat tiap kali pionmu mampir di kota milikmu.' : 'Bangun rumah harus merata dan memiliki semua kota satu warna.'} Stok bank: ${E.housesLeft(v)} rumah, ${E.hotelsLeft(v)} hotel.</p>` : ''}</div>`;
   }
@@ -1024,10 +1065,14 @@
     const chance = c.d === 'chance', title = chance ? 'KESEMPATAN' : 'DANA UMUM';
     // ikon & efek uang per jenis kartu
     const icon = { move: C.to === 0 ? '🏁' : TL[C.to] && TL[C.to].t === 'rail' ? '🚂' : '📍', near: C.k === 'rail' ? '🚂' : '⚡', back: '⬅️', jail: '🚔',
-      cash: C.a > 0 ? '💰' : '💸', repair: '🔧', each: C.a > 0 ? '🤝' : '🎂', free: '🗝️' }[C.x] || '🎴';
-    const delta = C.x === 'cash' ? C.a : C.x === 'each' ? -C.a * Math.max(1, (v ? v.players.filter((p, i) => p && !p.out && i !== c.p).length : 1)) : 0;
+      cash: C.a > 0 ? '💰' : '💸', repair: '🔧', each: C.a > 0 ? '🤝' : '🎂', free: '🗝️', shield: '🛡️', fly: '✈️', fwd: '🛵', again: '🎲',
+      open: '🏷️', pct: C.a > 0 ? '🏦' : '🧾', perprop: '🧾', quake: '🌊', poor: '🤲', rich: '🎁', grant: '🏗️' }[C.x] || '🎴';
+    const delta = C.x === 'cash' ? C.a : C.x === 'each' ? -C.a * Math.max(1, (v ? v.players.filter((p, i) => p && !p.out && i !== c.p).length : 1))
+      : C.x === 'poor' ? -C.a : C.x === 'rich' ? C.a : 0;
     const amt = delta ? `<div class="cpAmt ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '+' : '−'}${money(Math.abs(delta))}</div>` : '';
-    const note = C.x === 'free' ? '<div class="cpNote">Kartu disimpan di dompet 🗝️</div>' : '';
+    const note = C.x === 'free' ? '<div class="cpNote">Kartu disimpan di dompet 🗝️</div>'
+      : C.x === 'shield' ? '<div class="cpNote">Kartu disimpan di dompet 🛡️</div>'
+      : C.x === 'fly' && c.p === myIdx ? '<div class="cpNote">Pilih tujuan: klik petak di papan ✈️</div>' : '';
     const sym = chance ? '?' : '💰', total = (chance ? E.CHANCE : E.CHEST).length;
     const spd = spdOf(v);
     el.className = c.d;
@@ -1128,7 +1173,7 @@
   }
   function primaryAction() {
     const b = document.querySelector('#actions button.go');
-    if (b && !b.disabled && ['roll', 'end'].includes(b.dataset.a)) b.click();
+    if (b && !b.disabled && ['roll', 'end', 'fly'].includes(b.dataset.a)) b.click();
   }
 
   function bind() {
@@ -1197,6 +1242,7 @@
       }
       if (a === 'bid') return sendAction('bid', { a: Math.round(+$('bidIn').value || 0) });
       if (a === 'buy') return sendAction('buy', { h: +b.dataset.h || 0 });
+      if (a === 'fly') return sendAction('fly', { t: flyPick });
       if (a === 'upgrade') { const v = currentView(); if (v && myIdx >= 0) sendAction('build', { t: v.players[myIdx].pos }); return; }
       if (a === 'bankrupt' && !confirm('Nyatakan bangkrut? Semua asetmu akan diserahkan.')) return;
       if (a === 'decline') {
@@ -1204,6 +1250,11 @@
         if (v && v.players[myIdx].cash >= TL[v.players[myIdx].pos].p && !v.cfg.auction && !confirm('Lewati tanpa membeli?')) return;
       }
       sendAction(a);
+    });
+    $('actions').addEventListener('change', e => {
+      if (e.target.id !== 'flySel') return;
+      const t = +e.target.value;
+      if (t >= 0) pickFly(t); else { flyPick = -1; Scene3D.highlight(-1); render(); }
     });
     $('modal').addEventListener('click', e => {
       if (e.target.id === 'modal' || e.target.closest('[data-close]')) return closeModal();
@@ -1216,6 +1267,7 @@
     $('status').addEventListener('click', e => { const tc = e.target.closest('[data-tile]'); if (tc) openModal('tile', +tc.dataset.tile); });
     $('cardPop').onclick = () => { $('cardPop').hidden = true; };
     $('wDeeds').addEventListener('click', e => {
+      if (e.target.closest('[data-sc]')) { toast('Kartu Bebas Sewa otomatis dipakai saat kamu harus membayar sewa berikutnya.'); return; }
       if (e.target.closest('[data-jc]')) {
         const v = currentView(), me = v && myIdx >= 0 ? v.players[myIdx] : null;
         if (me && me.jail && v.turn === myIdx && v.step === 'roll') sendAction('jailcard');
@@ -1277,7 +1329,7 @@
   // ---------- start ----------
   Scene3D.init($('c'), {
     plates: $('plates'),
-    onTile: t => { if (mode) openModal('tile', t); },
+    onTile: t => { if (!mode) return; if (flyMode(currentView()) && !modal) pickFly(t); else openModal('tile', t); },
     onCard: () => { if (pendingCard) showCard(); },
     onIdle: () => { render(); if (pendingCard) showCard(); },
     onDice: () => Snd.dice(),

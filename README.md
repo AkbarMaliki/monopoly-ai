@@ -61,7 +61,15 @@ Pilih **mode permainan** di menu (berlaku untuk lawan bot maupun room online):
   di satu warna sebelum menggadaikan kotanya.
 - Dadu kembar = main lagi; kembar 3× = penjara. Di penjara pemain **diam 2 giliran**, kecuali lempar dadu kembar (langsung bebas
   & jalan) atau memakai kartu Bebas dari Penjara (tampil di dompet, klik untuk memakai). Giliran ke-3 otomatis bebas tanpa denda.
-- 16 kartu Kesempatan dan 16 kartu Dana Umum bernuansa Indonesia (THR, tilang, Ketua RT, lomba 17-an, …).
+- 24 kartu Kesempatan dan 22 kartu Dana Umum bernuansa Indonesia (THR, tilang, Ketua RT, lomba 17-an, …). Selain kartu klasik
+  ada kartu tambahan dari varian lain:
+  - ✈️ **Kartu pesawat** (3 kartu, terinspirasi Monopoly Travel World Tour): pilih petak tujuan mana saja — klik petak di papan
+    atau pilih dari daftar — lalu pion terbang ke sana (lewat MULAI tetap dapat Rp 2jt). Dua tiket gratis, satu promo
+    berbayar Rp 1jt; semuanya boleh ditolak ("Tetap di sini").
+  - 🛡️ **Bebas Sewa**: disimpan di dompet, otomatis dipakai saat berikutnya harus membayar sewa.
+  - Maju 5 langkah, lempar dadu lagi, maju ke properti kosong terdekat, pajak kekayaan 10% / bunga deposito 5% dari uang tunai,
+    PBB per properti, subsidi renovasi per rumah/hotel, banjir (1 bangunan di kota termahalmu hilang),
+    sedekah ke pemain termiskin, dan arisan dari pemain terkaya.
 - Kekurangan uang → fase utang: jual bangunan, gadaikan, atau tawarkan tukar. Kalau tetap tidak cukup, bangkrut:
   aset diserahkan ke pemain penagih (atau kembali ke bank).
 - Tukar properti + uang antarpemain saat giliranmu. Properti yang warnanya masih ada bangunan tidak bisa ditukar.
@@ -74,7 +82,8 @@ hanya mengambil sebanyak uang tunai yang dimiliki pemain lain; kartu utilitas me
 
 Bot membeli properti sambil menyisakan cadangan uang yang disesuaikan dengan sewa termahal lawan, lebih agresif untuk
 properti yang melengkapi warnanya atau mencegah lawan melengkapi warna. Bot membangun rumah di grup dengan kenaikan sewa terbaik,
-menebus gadai saat kaya, menawar lelang sampai nilai perkiraannya, menjual/menggadaikan aset saat berutang, dan menawarkan
+menebus gadai saat kaya, memilih tujuan kartu pesawat (melengkapi/menghalangi warna, lewat MULAI, menghindari sewa mahal),
+menawar lelang sampai nilai perkiraannya, menjual/menggadaikan aset saat berutang, dan menawarkan
 tukar (uang atau tukar properti) untuk melengkapi warna. Bot menilai tawaran tukar dengan membandingkan untungnya sendiri
 terhadap untung lawan; bot Sulit paling sulit dibujuk.
 
